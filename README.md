@@ -38,7 +38,7 @@ A Python codebase that:
 ## Architecture
 
 ```mermaid
-%%{init: {'flowchart': {'curve': 'linear'}}}%%
+%%{init: {'flowchart': {'curve': 'step'}}}%%
 flowchart LR
     FI([Fault Injector])
 
