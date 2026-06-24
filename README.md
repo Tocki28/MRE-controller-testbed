@@ -38,31 +38,26 @@ A Python codebase that:
 ## Architecture
 
 ```mermaid
-flowchart TD
-    FI[Fault Injector] -->|injects fault| PS
+flowchart LR
+    FI([Fault Injector])
 
-    subgraph Testbed["Testbed Process"]
-        PS[Plant Simulator\nmulti-rate physics + noise]
-        PS -->|sensor readings| CH
-
-        subgraph CH["Controller Harness"]
-            HAL[Sensing HAL]
-            INF[Inference\nEIS · OES · state estimator]
-            CTL[Control\nPID · adaptive current]
-            FSM[Fault detector + recovery SM]
-            MM[Mode manager\nIDLE · HEATING · RUN_NOMINAL · FAULT_RECOVERY]
-            HAL --> INF --> CTL --> MM
-            INF --> FSM --> MM
-        end
-
-        CH -->|setpoints + commands| PS
-        CH --> BRK
-
-        BRK[OPC UA / MQTT broker]
-        BRK --> LOG[Telemetry + Event Log\nappend-only · structured JSON]
+    subgraph CELL["MRE Cell (simulated)"]
+        PLANT["Temperature · Current · Voltage\nEIS impedance · bath composition"]
     end
 
-    BRK <-->|observe / command| EXT[External client\nGrafana · Jupyter · Dashboard]
+    subgraph BRAIN["Autonomous Brain"]
+        INF["Inference\nelectrode health · state estimate"]
+        CTL["Control\nPID · adaptive current"]
+        FSM["Fault detection & recovery"]
+        MM["Mode manager\nIDLE · HEATING · RUN_NOMINAL · FAULT_RECOVERY"]
+        INF --> CTL --> MM
+        INF --> FSM --> MM
+    end
+
+    FI -->|disturbance| PLANT
+    PLANT -->|sensor readings| INF
+    MM -->|setpoints & commands| PLANT
+    BRAIN --> LOG[("Event log\n& telemetry")]
 ```
 
 ## Concrete deliverables (the contents of this folder when done)
