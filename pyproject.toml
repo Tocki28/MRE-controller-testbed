@@ -1,0 +1,23 @@
+[project]
+name = "moe-testbed"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "dash>=2.17",
+    "plotly>=5.20",
+    "numpy>=1.26",
+    "impedance>=0.9",
+    "transitions>=0.9",
+    "structlog>=24.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["testbed*"]
