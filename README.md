@@ -2,6 +2,10 @@
 
 Autonomous controller for molten oxide electrolysis (MOE) — live simulation with fault detection, EIS-based electrode health monitoring, and sequential recipe execution.
 
+## Architecture
+
+![Architecture diagram](docs/architecture.png)
+
 ## What it does
 
 Runs a simulated MOE cell and an autonomous brain in the same process. The brain monitors electrode health via EIS, manages temperature with a PID loop, adapts current to electrode degradation, detects and recovers from anode-effect faults, and executes a multi-phase voltage recipe across a simulated regolith batch — tracking O₂ production (anode) and bath oxide evolution throughout. No operator decisions after start.
