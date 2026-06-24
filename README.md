@@ -37,29 +37,7 @@ A Python codebase that:
 
 ## Architecture
 
-```mermaid
-%%{init: {'flowchart': {'curve': 'step'}}}%%
-flowchart LR
-    FI([Fault Injector])
-
-    subgraph CELL["MRE Cell (simulated)"]
-        PLANT["Temperature · Current · Voltage\nEIS impedance · bath composition"]
-    end
-
-    subgraph BRAIN["Autonomous Brain"]
-        INF["Inference\nelectrode health · state estimate"]
-        CTL["Control\nPID · adaptive current"]
-        FSM["Fault detection & recovery"]
-        MM["Mode manager\nIDLE · HEATING · RUN_NOMINAL · FAULT_RECOVERY"]
-        INF --> CTL --> MM
-        INF --> FSM --> MM
-    end
-
-    FI -->|disturbance| PLANT
-    PLANT -->|sensor readings| INF
-    MM -->|setpoints & commands| PLANT
-    BRAIN --> LOG[("Event log\n& telemetry")]
-```
+![Architecture diagram](docs/architecture.png)
 
 ## Concrete deliverables (the contents of this folder when done)
 
