@@ -21,9 +21,9 @@ python3.11 -m pytest tests/ -v
 
 ## Why this first
 
-You named the wedge correctly: **integration into industrial systems + data fusion across subsystems is the actual problem**. Single algorithms (a good EIS fit, a good OES peak-finder) are easy to build alone but easy to dismiss - "nice research demo." A working multi-rate testbed with industrial protocol interfaces, fault injection, and slots for every subsystem demonstrates that you understand the real problem shape. It is harder to dismiss because it shows the integration story end-to-end.
+The hard problem in autonomous process control is not any individual algorithm - it is getting EIS, OES, temperature, current, and voltage to feed a single coherent state estimate, and having that estimate drive actuator commands in real time without an operator in the loop. A standalone EIS fit or OES peak-finder cannot demonstrate this. The testbed can.
 
-The testbed is also the bench. Every algorithm you build subsequently (EIS pipeline, OES inference, state estimator, fault detector, recovery SM) runs **inside** the testbed. Nothing exists outside it. This is how serious embedded systems work gets done - build the harness first, then everything you build is validated against it from day one.
+It also serves as the integration bench. Every subsequent module (EIS pipeline, OES inference, fault detector, recovery state machine) is developed and validated by plugging it into this harness. Nothing is built in isolation.
 
 ## What it is
 
