@@ -1,138 +1,120 @@
-"""Architecture diagram — clean block diagram style with negative feedback loop."""
+"""Architecture diagram — dark background, two boxes, clean feedback loop."""
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import FancyBboxPatch
 
-# ── Canvas ────────────────────────────────────────────────────────────────────
-fig, ax = plt.subplots(figsize=(18, 10))
-BG = "#f5f5f5"
+BG       = "#1a1a1a"
+CELL_BG  = "#0d2137"
+CELL_ED  = "#4a9eff"
+BRAIN_BG = "#0d2a0d"
+BRAIN_ED = "#4aaa4a"
+FI_BG    = "#3a1a1a"
+FI_ED    = "#cc4444"
+FI_TXT   = "#ff8888"
+LOG_BG   = "#2a2a2a"
+LOG_ED   = "#666666"
+WHITE    = "#ffffff"
+LGRAY    = "#aaaaaa"
+
+fig, ax = plt.subplots(figsize=(20, 9))
 fig.patch.set_facecolor(BG)
 ax.set_facecolor(BG)
-ax.set_xlim(0, 18)
-ax.set_ylim(0, 10)
+ax.set_xlim(0, 20)
+ax.set_ylim(0, 9)
 ax.axis("off")
-
-# ── Colour palette ────────────────────────────────────────────────────────────
-BLUE_F  = "#d6e8f7"
-BLUE_E  = "#2a7ab8"
-GREEN_F = "#d5ecd8"
-GREEN_E = "#2e8b57"
-RED_F   = "#fddede"
-RED_E   = "#c0392b"
-GRAY_F  = "#e8e8e8"
-GRAY_E  = "#888888"
-BLACK   = "#1a1a1a"
-DKBLUE  = "#1a4f78"
-DKGREEN = "#1a5c35"
-DKRED   = "#8b1a1a"
 
 def box(x, y, w, h, fc, ec, lw=2.5):
     ax.add_patch(FancyBboxPatch(
         (x, y), w, h,
-        boxstyle="round,pad=0.18",
+        boxstyle="round,pad=0.2",
         facecolor=fc, edgecolor=ec,
         linewidth=lw, zorder=2,
     ))
 
-def txt(x, y, s, color=BLACK, size=12, ha="center", va="center",
-        bold=False, wrap=False):
+def arrow(x0, y0, x1, y1, color, lw=2.8):
+    ax.annotate("",
+        xy=(x1, y1), xytext=(x0, y0),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color=color, lw=lw,
+            mutation_scale=22,
+            connectionstyle="arc3,rad=0.0",
+        ),
+        zorder=5,
+    )
+
+def txt(x, y, s, color=WHITE, size=12, ha="center", va="center", bold=False):
     ax.text(x, y, s, color=color, fontsize=size,
             ha=ha, va=va,
             fontweight="bold" if bold else "normal",
-            fontfamily="DejaVu Sans",
-            linespacing=1.6, zorder=4)
-
-def arrow_h(x0, y, x1, color, lw=2.5, label="", label_above=True):
-    """Horizontal arrow from (x0,y) to (x1,y) with centred label."""
-    ax.annotate("",
-        xy=(x1, y), xytext=(x0, y),
-        arrowprops=dict(arrowstyle="-|>", color=color,
-                        lw=lw, mutation_scale=20),
-        zorder=3)
-    if label:
-        mid = (x0 + x1) / 2
-        dy  = 0.28 if label_above else -0.28
-        txt(mid, y + dy, label, color, 11, bold=True)
-
-def arrow_v(x, y0, y1, color, lw=2.5, label="", label_right=True):
-    ax.annotate("",
-        xy=(x, y1), xytext=(x, y0),
-        arrowprops=dict(arrowstyle="-|>", color=color,
-                        lw=lw, mutation_scale=20),
-        zorder=3)
-    if label:
-        dx = 0.3 if label_right else -0.3
-        txt(x + dx, (y0 + y1) / 2, label, color, 10,
-            ha="left" if label_right else "right", bold=True)
+            linespacing=1.7, zorder=4)
 
 # ── Fault Injector ─────────────────────────────────────────────────────────────
-box(3.8, 8.0, 2.8, 1.4, RED_F, RED_E)
-txt(5.2, 8.7, "Fault Injector", DKRED, 13, bold=True)
-txt(5.2, 8.25, "simulates disturbances", DKRED, 10)
+from matplotlib.patches import Ellipse
+ax.add_patch(Ellipse((1.6, 6.5), 2.6, 1.4,
+    facecolor=FI_BG, edgecolor=FI_ED, linewidth=2.0, zorder=2))
+txt(1.6, 6.65, "Fault Injector",      FI_TXT, 11, bold=True)
+txt(1.6, 6.25, "simulates problems",  FI_TXT, 9.5)
 
 # ── MRE Cell ───────────────────────────────────────────────────────────────────
-box(1.0, 2.8, 5.2, 4.6, BLUE_F, BLUE_E)
-txt(3.6, 6.9,  "MRE Cell",            DKBLUE, 15, bold=True)
-txt(3.6, 6.35, "Regolith + electricity",         BLACK, 11)
-txt(3.6, 5.9,  "→ electrolysis running",         BLACK, 11)
-txt(3.6, 5.3,  "Sensors read:",                  BLACK, 11, bold=True)
-txt(3.6, 4.85, "Temperature · Current · Voltage", BLACK, 10)
-txt(3.6, 4.45, "Electrode condition (EIS)",       BLACK, 10)
-txt(3.6, 3.85, "Outputs:",                        BLACK, 11, bold=True)
-txt(3.6, 3.4,  "O₂ at anode  +  alloy at cathode", BLACK, 10)
+CX, CY, CW, CH = 3.2, 1.0, 5.0, 7.0
+box(CX, CY, CW, CH, CELL_BG, CELL_ED)
+txt(CX + CW/2, CY + CH - 0.55,  "MRE Cell",             CELL_ED, 15, bold=True)
+txt(CX + CW/2, CY + CH - 1.15,  "Regolith + electricity",       WHITE, 11)
+txt(CX + CW/2, CY + CH - 1.65,  "electrolysis running continuously", WHITE, 10.5)
+txt(CX + CW/2, CY + CH - 2.45,  "Sensors read:",                WHITE, 11, bold=True)
+txt(CX + CW/2, CY + CH - 3.0,   "Temperature · Current · Voltage", WHITE, 10.5)
+txt(CX + CW/2, CY + CH - 3.5,   "Electrode condition (EIS)",    WHITE, 10.5)
+txt(CX + CW/2, CY + CH - 4.3,   "Outputs:",                     WHITE, 11, bold=True)
+txt(CX + CW/2, CY + CH - 4.85,  "O₂ at anode  +  alloy at cathode", WHITE, 10.5)
 
 # ── Autonomous Brain ────────────────────────────────────────────────────────────
-box(9.8, 2.8, 6.0, 4.6, GREEN_F, GREEN_E)
-txt(12.8, 6.9,  "Autonomous Brain",              DKGREEN, 15, bold=True)
-txt(12.8, 6.35, "Reads all sensors every second", BLACK, 11)
-txt(12.8, 5.75, "Asks:",                          BLACK, 11, bold=True)
-txt(12.8, 5.3,  "•  Is the electrode healthy?",        BLACK, 10.5)
-txt(12.8, 4.85, "•  Is the cell running efficiently?", BLACK, 10.5)
-txt(12.8, 4.4,  "•  Has a fault occurred?",            BLACK, 10.5)
-txt(12.8, 3.85, "Decides:",                       BLACK, 11, bold=True)
-txt(12.8, 3.4,  "Adjust current  ·  Trigger recovery", BLACK, 10.5)
+BX, BY, BW, BH = 10.3, 1.0, 5.5, 7.0
+box(BX, BY, BW, BH, BRAIN_BG, BRAIN_ED)
+txt(BX + BW/2, BY + BH - 0.55,  "Autonomous Brain",             BRAIN_ED, 15, bold=True)
+txt(BX + BW/2, BY + BH - 1.15,  "Reads sensors every second",   WHITE, 11)
+txt(BX + BW/2, BY + BH - 2.0,   "Asks:",                        WHITE, 11, bold=True)
+txt(BX + BW/2, BY + BH - 2.6,   "•  Is the electrode healthy?",       WHITE, 10.5)
+txt(BX + BW/2, BY + BH - 3.15,  "•  Is the cell running efficiently?", WHITE, 10.5)
+txt(BX + BW/2, BY + BH - 3.7,   "•  Has a fault occurred?",           WHITE, 10.5)
+txt(BX + BW/2, BY + BH - 4.55,  "Decides:",                     WHITE, 11, bold=True)
+txt(BX + BW/2, BY + BH - 5.1,   "Adjust current  ·  Trigger recovery", WHITE, 10.5)
+txt(BX + BW/2, BY + BH - 5.65,  "and sends commands back",      WHITE, 10.5)
 
 # ── Event Log ──────────────────────────────────────────────────────────────────
-box(14.0, 8.0, 3.2, 1.4, GRAY_F, GRAY_E, lw=2.0)
-txt(15.6, 8.7,  "Event Log",            GRAY_E, 13, bold=True)
-txt(15.6, 8.25, "records every decision", "#555", 10)
+LX, LY, LW, LH = 16.8, 3.5, 2.8, 2.0
+box(LX, LY, LW, LH, LOG_BG, LOG_ED, lw=1.8)
+txt(LX + LW/2, LY + LH/2 + 0.3,  "Event Log",             LGRAY, 11, bold=True)
+txt(LX + LW/2, LY + LH/2 - 0.25, "records every decision", LGRAY, 9.5)
 
-# ── Connection: Fault Injector → MRE Cell ──────────────────────────────────────
-arrow_v(5.2, 8.0, 7.4, RED_E, label="injects fault", label_right=True)
-# line down to cell top
-ax.annotate("",
-    xy=(3.6, 7.4), xytext=(3.6, 7.0),
-    arrowprops=dict(arrowstyle="-|>", color=RED_E, lw=2.5, mutation_scale=18),
-    zorder=3)
-ax.plot([5.2, 5.2, 3.6], [8.0, 7.4, 7.4], color=RED_E, lw=2.5, zorder=3)
+# ── Arrow: Fault Injector → MRE Cell ──────────────────────────────────────────
+ax.plot([1.6, 1.6, CX], [5.8, CY + CH * 0.78, CY + CH * 0.78],
+        color=FI_ED, lw=2.0, zorder=3)
+arrow(CX, CY + CH * 0.78, CX + 0.01, CY + CH * 0.78, FI_ED, lw=2.0)
+txt(2.4, CY + CH * 0.78 + 0.3, "injects fault", FI_TXT, 9.5)
 
-# ── Feedback loop ──────────────────────────────────────────────────────────────
-# Top arrow: Cell → Brain  (sensor readings)
-arrow_h(6.2, 5.7, 9.8, BLUE_E, lw=3.0,
-        label="Sensor Readings", label_above=True)
+# ── Gap between boxes ──────────────────────────────────────────────────────────
+GAP_X0 = CX + CW          # 8.2
+GAP_X1 = BX               # 10.3
+MID_X  = (GAP_X0 + GAP_X1) / 2
 
-# Bottom arrow: Brain → Cell  (commands — the negative feedback)
-arrow_h(9.8, 3.9, 6.2, GREEN_E, lw=3.0,
-        label="Commands (negative feedback)", label_above=False)
+# Top arrow: sensor readings Cell → Brain
+S_Y = CY + CH * 0.72      # ~6.04
+arrow(GAP_X0, S_Y, GAP_X1, S_Y, CELL_ED, lw=3.0)
+txt(MID_X, S_Y + 0.38, "Sensor Readings", CELL_ED, 12, bold=True)
 
-# ── Brain → Event Log ──────────────────────────────────────────────────────────
-ax.plot([15.8, 15.8, 15.6], [7.4, 8.0, 8.0], color=GRAY_E, lw=2.0, zorder=3)
-ax.annotate("",
-    xy=(15.6, 8.0), xytext=(15.6, 8.0),
-    arrowprops=dict(arrowstyle="-|>", color=GRAY_E, lw=2.0, mutation_scale=16),
-    zorder=3)
-arrow_v(15.8, 7.4, 8.0, GRAY_E, lw=2.0)
+# Bottom arrow: commands Brain → Cell  (negative feedback)
+C_Y = CY + CH * 0.28      # ~2.96
+arrow(GAP_X1, C_Y, GAP_X0, C_Y, BRAIN_ED, lw=3.0)
+txt(MID_X, C_Y - 0.4, "Commands  (negative feedback)", BRAIN_ED, 12, bold=True)
 
-# ── "Negative Feedback Loop" brace label ───────────────────────────────────────
-ax.annotate("",
-    xy=(1.0, 2.1), xytext=(15.8, 2.1),
-    arrowprops=dict(arrowstyle="<->", color="#aaaaaa", lw=1.5,
-                    mutation_scale=14),
-    zorder=3)
-txt(8.4, 1.75, "NEGATIVE FEEDBACK LOOP", "#aaaaaa", 10, bold=True)
+# ── Arrow: Brain → Event Log ───────────────────────────────────────────────────
+MID_Y = BY + BH / 2
+ax.plot([BX + BW, LX], [MID_Y, MID_Y], color=LOG_ED, lw=1.8, zorder=3)
+arrow(LX - 0.01, MID_Y, LX, MID_Y, LOG_ED, lw=1.8)
 
-plt.tight_layout(pad=0.3)
-plt.savefig("docs/architecture.png", dpi=150, bbox_inches="tight",
+plt.tight_layout(pad=0)
+plt.savefig("docs/architecture_v2.png", dpi=150, bbox_inches="tight",
             facecolor=BG, edgecolor="none")
 plt.close()
-print("Generated docs/architecture.png")
+print("Generated docs/architecture_v2.png")
