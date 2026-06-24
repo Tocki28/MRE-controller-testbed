@@ -2,7 +2,7 @@
 
 Simulation platform for an autonomous controller for Molten Regolith Electrolysis (MRE).
 
-![Architecture](docs/architecture_v2.png)
+![Architecture](docs/architecture_v3.png)
 
 ---
 
