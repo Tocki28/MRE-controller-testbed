@@ -21,20 +21,20 @@ A simulation testbed for developing and validating that autonomous controller.
 It is not a proof that the chemistry works — that is established. It is a software platform that:
 
 1. Simulates an MRE cell (temperature dynamics, electrolysis physics, electrode degradation, bath composition evolution)
-2. Runs an autonomous brain against that simulation in a closed negative feedback loop
-3. Lets you inject faults and observe whether the brain detects and recovers from them
+2. Runs an autonomous feedback controller against that simulation in a closed negative feedback loop
+3. Lets you inject faults and observe whether the controller detects and recovers from them
 4. Logs every sensor reading, inference, and command decision
 
-The brain reads sensor data from the cell every second, estimates the current state of the process (electrode health, Faradaic efficiency, bath composition), and issues commands back to the cell. That loop runs continuously with no human decisions after the initial start.
+The controller reads sensor data from the cell every second, estimates the current state of the process (electrode health, Faradaic efficiency, bath composition), and issues commands back to the cell. That loop runs continuously with no human decisions after the initial start.
 
 ## Architecture
 
 The controller operates as a negative feedback loop:
 
 - **MRE Cell** (left): simulated electrolysis process. Produces sensor streams — temperature, current, voltage, EIS impedance spectrum, bath oxide fractions.
-- **Autonomous Brain** (right): reads those streams, estimates process state, decides whether to adjust current, flag a fault, or trigger recovery.
-- **Feedback**: commands from the brain flow back to the cell every control cycle. Deviation from the desired operating point produces a corrective response — that is the negative feedback.
-- **Fault Injector**: injects controlled disturbances (anode effect, voltage spike) to test whether the brain detects and recovers correctly.
+- **Feedback Controller** (right): reads those streams, estimates process state, decides whether to adjust current, flag a fault, or trigger recovery.
+- **Feedback**: commands from the controller flow back to the cell every control cycle. Deviation from the desired operating point produces a corrective response — that is the negative feedback.
+- **Fault Injector**: injects controlled disturbances (anode effect, voltage spike) to test whether the controller detects and recovers correctly.
 - **Event Log**: append-only record of every state transition and command issued.
 
 ## Setup

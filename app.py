@@ -1,4 +1,4 @@
-"""Autonomous MOE Controller - Live Dash Dashboard.
+"""MRE Feedback Controller - Live Dash Dashboard.
 
 Entry point: python app.py
 """
@@ -44,7 +44,7 @@ app.layout = html.Div(
 
         # ── Header ────────────────────────────────────────────────────────
         html.H2(
-            "Autonomous MOE Controller - Live Simulation",
+            "MRE Feedback Controller - Live Simulation",
             style={"marginBottom": "8px"},
         ),
         html.Div(id="mode-badge", style={"marginBottom": "12px"}),
