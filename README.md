@@ -35,44 +35,34 @@ A Python codebase that:
 4. **Supports fault injection.** A CLI or notebook lets you trigger anode effect, electrode degradation trajectories, melt freeze, contamination events. The fault catalog (F1) is the source of truth for what scenarios the testbed must support.
 5. **Emits an event log + telemetry stream** in the same format the real on-orbit version would. Append-only, idempotent, replayable.
 
-## Architecture (mirrors the system architecture doc)
+## Architecture
 
-```
-   ┌────────────────────────────────────────────────────────────────┐
-   │  TESTBED PROCESS (Python)                                       │
-   │                                                                 │
-   │   ┌──────────────────┐         ┌────────────────────────────┐  │
-   │   │   PLANT SIM      │ samples │   CONTROLLER HARNESS       │  │
-   │   │  (multi-rate     │────────►│                            │  │
-   │   │   physics +      │         │  ┌──────────────────────┐  │  │
-   │   │   noise model)   │ ◄────── │  │  Sensing HAL (mock)  │  │  │
-   │   └──────────────────┘ acts    │  ├──────────────────────┤  │  │
-   │           ▲                    │  │  Inference (plug-in) │  │  │
-   │           │ fault injection    │  ├──────────────────────┤  │  │
-   │   ┌──────────────────┐         │  │  Control (plug-in)   │  │  │
-   │   │ FAULT INJECTOR   │────────►│  ├──────────────────────┤  │  │
-   │   │  (CLI/notebook)  │         │  │  Fault SM (plug-in)  │  │  │
-   │   └──────────────────┘         │  ├──────────────────────┤  │  │
-   │                                │  │  Mode manager        │  │  │
-   │                                │  └──────────────────────┘  │  │
-   │                                └──────────────┬─────────────┘  │
-   │                                               │                │
-   │                  ┌────────────────────────────▼────────────┐   │
-   │                  │  OPC UA / MQTT broker (in-process)       │   │
-   │                  └────────────────────────────┬────────────┘   │
-   │                                               │                │
-   │                                ┌──────────────▼─────────────┐  │
-   │                                │  TELEMETRY + EVENT LOG     │  │
-   │                                │  (append-only, structured) │  │
-   │                                └────────────────────────────┘  │
-   └────────────────────────────────────────────────────────────────┘
-                                ▲
-                                │  external OPC UA / MQTT clients can
-                                │  observe and (later) command
-                                ▼
-   ┌──────────────────────────────────────────────┐
-   │  External viewer (Grafana? Jupyter? Streamlit?)│
-   └──────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    FI[Fault Injector] -->|injects fault| PS
+
+    subgraph Testbed["Testbed Process"]
+        PS[Plant Simulator\nmulti-rate physics + noise]
+        PS -->|sensor readings| CH
+
+        subgraph CH["Controller Harness"]
+            HAL[Sensing HAL]
+            INF[Inference\nEIS · OES · state estimator]
+            CTL[Control\nPID · adaptive current]
+            FSM[Fault detector + recovery SM]
+            MM[Mode manager\nIDLE · HEATING · RUN_NOMINAL · FAULT_RECOVERY]
+            HAL --> INF --> CTL --> MM
+            INF --> FSM --> MM
+        end
+
+        CH -->|setpoints + commands| PS
+        CH --> BRK
+
+        BRK[OPC UA / MQTT broker]
+        BRK --> LOG[Telemetry + Event Log\nappend-only · structured JSON]
+    end
+
+    BRK <-->|observe / command| EXT[External client\nGrafana · Jupyter · Dashboard]
 ```
 
 ## Concrete deliverables (the contents of this folder when done)
