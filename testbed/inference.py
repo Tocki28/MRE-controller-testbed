@@ -42,7 +42,7 @@ def _fit_randles(
     """Least-squares fit of Randles model to measured (noisy) impedance.
 
     Returns (Rs, Rct, Cdl) estimates.
-    Uses a simple grid search over a coarse parameter space — sufficient
+    Uses a simple grid search over a coarse parameter space - sufficient
     for the v1 simulation without requiring scipy.
     """
     best_err = float("inf")
@@ -61,8 +61,8 @@ def _fit_randles(
 class MOEInference(InferenceModule):
     """Composed inference module: EIS + OES + EMA state estimator."""
 
-    RCT_NEW = 0.5    # Ω — nominal Rct for a fresh electrode
-    RCT_END = 5.0    # Ω — Rct at end-of-life
+    RCT_NEW = 0.5    # Ω - nominal Rct for a fresh electrode
+    RCT_END = 5.0    # Ω - Rct at end-of-life
 
     def __init__(self) -> None:
         self._last_eis_time: float = -999.0

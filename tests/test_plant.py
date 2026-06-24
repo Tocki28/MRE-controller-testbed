@@ -24,7 +24,7 @@ def test_temperature_responds_to_heater() -> None:
     so net dT is clearly positive regardless of noise.
     """
     sim = PlantSimulator()
-    sim._state.T_bulk = 20.0   # room temp — zero radiative loss
+    sim._state.T_bulk = 20.0   # room temp - zero radiative loss
     setpoints = {"heater_power": 10_000.0, "I_cell_setpoint": 10.0}
     initial_T = sim._state.T_bulk
     for _ in range(10):

@@ -1,10 +1,10 @@
-# Testbed v1 MVP — maximum features, minimum work
+# Testbed v1 MVP - maximum features, minimum work
 
 > The "see something tangible" first build. A live dashboard demo of an autonomous MOE controller running on a simulated cell, with EIS-based health inference, adaptive control, fault injection, fault detection, mode transitions, and event logging. ~20–25 hours of focused work. End artifact: a GitHub repo + a 30-second screen capture you can paste into a Substack post.
 
 ## The goal
 
-You want to **fructify** — see an outcome, fast. The constraint: maximum impressive features per hour of work. The deliverable: something you can demo in 30 seconds on your laptop, screen-record, and link to.
+You want to **fructify** - see an outcome, fast. The constraint: maximum impressive features per hour of work. The deliverable: something you can demo in 30 seconds on your laptop, screen-record, and link to.
 
 This is not a full testbed (that's the broader `README.md`). This is the smallest version that demonstrates the entire autonomy story end-to-end.
 
@@ -14,7 +14,7 @@ This is not a full testbed (that's the broader `README.md`). This is the smalles
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
-│  Autonomous MOE Controller — Live Simulation                            │
+│  Autonomous MOE Controller - Live Simulation                            │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  MODE: [RUN_NOMINAL]    Uptime: 02:14:33    Cell #1                    │
 ├─────────────────────────────────────────────────────────────────────────┤
@@ -170,7 +170,7 @@ If all of those tick, the v1 MVP is done.
 3. **Push to public GitHub.** Repo name: `moe-controller-testbed` or similar. README with one-paragraph thesis, one screenshot, run instructions, link to a longer Substack post.
 4. **Substack draft.** Title: "I built an autonomous controller for high-temperature electrolysis. Here's why and how." Explain the thesis, the autonomy gap, the architecture, link to the repo. Post.
 5. **Hacker News.** Submit the Substack post under "Show HN" tag. Be present in the comments for the first 4 hours.
-6. **Now** — and only now — start the high-status outreach. The cold email to Helios / Hojong Kim / Adi Oltean opens with: "I built [link]. I think the autonomous control gap in MOE is unaddressed for the reasons in [Substack link]. I'd value your take on [specific question]."
+6. **Now** - and only now - start the high-status outreach. The cold email to Helios / Hojong Kim / Adi Oltean opens with: "I built [link]. I think the autonomous control gap in MOE is unaddressed for the reasons in [Substack link]. I'd value your take on [specific question]."
 
 That is the path from zero artifact today to a credible cold email in ~5 weeks.
 

@@ -11,7 +11,7 @@ import numpy as np
 # Faraday constant (C/mol)
 _FARADAY = 96_485.0
 
-# Internal bath depletion model — tracks how oxide fractions evolve as
+# Internal bath depletion model - tracks how oxide fractions evolve as
 # different oxides are preferentially reduced.  These phases are physics-
 # internal only: the cathode output is always an alloy, not sequential
 # pure metals.  Externally we surface O₂ production (the anode output),
@@ -46,11 +46,11 @@ class PlantState:
     uptime_s: float = 0.0
     fault_active: str | None = None   # e.g. "anode_effect"
 
-    # O₂ production — the primary mission output (anode side).
+    # O₂ production - the primary mission output (anode side).
     # Computed from Faraday's law: 2O²⁻ → O₂ + 4e⁻
     O2_produced_mol: float = 0.0     # mol, cumulative
 
-    # Internal bath oxide phase tracker — drives realistic composition drift.
+    # Internal bath oxide phase tracker - drives realistic composition drift.
     # Not surfaced in the dashboard; does not represent pure metal extraction.
     _bath_phase: str = field(default="Fe", repr=False)
 
@@ -67,7 +67,7 @@ class PlantSimulator:
     """
 
     # Nominal cell parameters
-    R_BASE: float = 0.030   # Ω — nominal resistance at full health
+    R_BASE: float = 0.030   # Ω - nominal resistance at full health
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
@@ -126,12 +126,12 @@ class PlantSimulator:
                 np.clip(0.8 * s.electrode_health + 0.1 * rng.random(), 0.1, 0.98)
             )
 
-            # O₂ production at anode — Faraday's law: 2O²⁻ → O₂ + 4e⁻
+            # O₂ production at anode - Faraday's law: 2O²⁻ → O₂ + 4e⁻
             # n(O₂) = I · η · dt / (4 · F)
             dO2 = s.I_cell * s.faradaic_efficiency * dt / (4.0 * _FARADAY)
             s.O2_produced_mol += dO2
 
-            # Bath oxide composition drift — oxides are preferentially reduced
+            # Bath oxide composition drift - oxides are preferentially reduced
             # in order of decomposition potential (Fe₂O₃ first, then SiO₂, etc.).
             # The cathode output is always a mixed alloy; this tracks what's
             # left in the bath, not what's been purely extracted.

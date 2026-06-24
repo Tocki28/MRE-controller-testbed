@@ -1,4 +1,4 @@
-"""Autonomous MOE Controller — Live Dash Dashboard.
+"""Autonomous MOE Controller - Live Dash Dashboard.
 
 Entry point: python app.py
 """
@@ -27,7 +27,7 @@ MODE_COLORS = {
     "IDLE":           "#9E9E9E",
 }
 
-# Faraday constant — used to compute O₂ production rate display
+# Faraday constant - used to compute O₂ production rate display
 _FARADAY = 96_485.0
 _O2_MOLAR_MASS = 32.0  # g/mol
 
@@ -44,7 +44,7 @@ app.layout = html.Div(
 
         # ── Header ────────────────────────────────────────────────────────
         html.H2(
-            "Autonomous MOE Controller — Live Simulation",
+            "Autonomous MOE Controller - Live Simulation",
             style={"marginBottom": "8px"},
         ),
         html.Div(id="mode-badge", style={"marginBottom": "12px"}),
@@ -55,7 +55,7 @@ app.layout = html.Div(
         html.Div(
             style={"display": "flex", "gap": "24px", "alignItems": "flex-start"},
             children=[
-                # Left col — metric boxes (30%)
+                # Left col - metric boxes (30%)
                 html.Div(
                     style={"flex": "0 0 30%"},
                     children=[
@@ -90,7 +90,7 @@ app.layout = html.Div(
                         ),
                     ],
                 ),
-                # Right col — time series (70%)
+                # Right col - time series (70%)
                 html.Div(
                     style={"flex": "1"},
                     children=[
@@ -107,16 +107,16 @@ app.layout = html.Div(
         html.Div(
             style={"display": "flex", "gap": "24px", "alignItems": "flex-start"},
             children=[
-                # Left col — EIS / health gauge
+                # Left col - EIS / health gauge
                 html.Div(
                     style={"flex": "1"},
                     children=[
-                        html.H4("EIS — Electrode Health", style={"marginTop": "0", "marginBottom": "4px"}),
+                        html.H4("EIS - Electrode Health", style={"marginTop": "0", "marginBottom": "4px"}),
                         dcc.Graph(id="nyquist", config={"displayModeBar": False}),
                         dcc.Graph(id="health-gauge", config={"displayModeBar": False}),
                     ],
                 ),
-                # Right col — composition + OES metrics
+                # Right col - composition + OES metrics
                 html.Div(
                     style={"flex": "1"},
                     children=[
@@ -422,7 +422,7 @@ def update(n):  # noqa: ANN001
         plot_bgcolor="rgba(0,0,0,0)",
     )
 
-    # ── Composition bar (OES panel — static colours) ────────────────────────
+    # ── Composition bar (OES panel - static colours) ────────────────────────
     comp = inferred.get("composition_est", state.composition)
     comp_fig = go.Figure(
         go.Bar(
@@ -499,7 +499,7 @@ def update(n):  # noqa: ANN001
 
     # ── Fault status ────────────────────────────────────────────────────────
     if state.fault_active:
-        fault_status = f"Active fault: {state.fault_active} — V_cell = {state.V_cell:.2f} V"
+        fault_status = f"Active fault: {state.fault_active} - V_cell = {state.V_cell:.2f} V"
     else:
         fault_status = ""
 

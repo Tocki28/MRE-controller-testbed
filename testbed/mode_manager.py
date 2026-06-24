@@ -50,7 +50,7 @@ class ModeManager:
             return str(self.state)
 
     # The trigger methods (start, target_reached, etc.) are injected by
-    # Machine into *self* — we just need to call them safely.
+    # Machine into *self* - we just need to call them safely.
     def safe_trigger(self, trigger: str) -> None:
         """Call a trigger from any thread."""
         with self._lock:
