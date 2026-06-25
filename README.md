@@ -2,10 +2,6 @@
 
 Simulation platform for an autonomous controller for Molten Regolith Electrolysis (MRE).
 
-![Architecture](docs/architecture_v3.png)
-
----
-
 ## What problem this solves
 
 Molten Regolith Electrolysis is the leading candidate for in-situ resource utilisation on the Moon and Mars. Run current through molten regolith at ~1600°C, and you get oxygen at the anode (for propellant and life support) and a metal alloy at the cathode (structural material). The chemistry is proven. Boston Metal, Helios, and ESA have all demonstrated it at lab scale.
@@ -29,13 +25,31 @@ The controller reads sensor data from the cell every second, estimates the curre
 
 ## Architecture
 
-The controller operates as a negative feedback loop:
+```mermaid
+flowchart LR
+    FI([Fault Injector\nsimulates problems]) -->|injects fault| CELL
 
-- **MRE Cell** (left): simulated electrolysis process. Produces sensor streams — temperature, current, voltage, EIS impedance spectrum, bath oxide fractions.
-- **Feedback Controller** (right): reads those streams, estimates process state, decides whether to adjust current, flag a fault, or trigger recovery.
-- **Feedback**: commands from the controller flow back to the cell every control cycle. Deviation from the desired operating point produces a corrective response — that is the negative feedback.
-- **Fault Injector**: injects controlled disturbances (anode effect, voltage spike) to test whether the controller detects and recovers correctly.
-- **Event Log**: append-only record of every state transition and command issued.
+    CELL["MRE Cell\nRegolith + electricity\nSensors: T · V · I · EIS\nOutputs: O₂ + alloy"]
+
+    CELL -->|sensor readings| INF
+
+    subgraph FC["Feedback Controller"]
+        INF["Inference\nEIS health fit\nstate estimate\nOES composition"]
+        CTL["Control\nPID temperature\nadaptive current"]
+        FD["Fault Detection\nanode effect\nrecovery SM"]
+        MM["Mode Manager\nIDLE · HEATING\nRUN_NOMINAL\nFAULT_RECOVERY\nSAFE_SHUTDOWN"]
+
+        INF --> CTL
+        INF --> FD
+        CTL --> MM
+        FD --> MM
+    end
+
+    MM -->|setpoints & commands\nnegative feedback| CELL
+    MM --> LOG["Event Log\nall decisions\nrecorded"]
+```
+
+The controller operates as a negative feedback loop. The MRE Cell produces sensor streams every second. The Feedback Controller reads those streams, estimates the current process state (electrode health, Faradaic efficiency, bath composition), and issues setpoints and commands back to the cell. Deviation from the desired operating point produces a corrective response. The Fault Injector injects controlled disturbances to test whether the controller detects and recovers correctly. The Event Log records every state transition and command.
 
 ## Setup
 
