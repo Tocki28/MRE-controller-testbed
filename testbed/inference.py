@@ -6,7 +6,7 @@ to a health proxy.
 
 OES: trivially returns composition from plant state + tiny noise.
 
-State estimator: low-pass (α=0.1) filter on raw health measurement.
+State estimator: low-pass (α=0.3) filter on raw health measurement.
 """
 
 from __future__ import annotations
@@ -22,7 +22,7 @@ from testbed.plant import PlantState
 log = structlog.get_logger(__name__)
 
 EIS_INTERVAL_S = 60.0   # sim-seconds between sweeps
-ALPHA = 0.1              # EMA smoothing
+ALPHA = 0.3              # EMA smoothing
 
 
 def _randles_impedance(
