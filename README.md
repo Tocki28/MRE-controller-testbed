@@ -64,6 +64,8 @@ python3.11 app.py
 
 Open [http://127.0.0.1:8050](http://127.0.0.1:8050) in your browser.
 
+https://github.com/Tocki28/MRE-controller-testbed/raw/main/docs/demo.mp4
+
 ![Dashboard](docs/127.0.0.1_8050_.png)
 
 The dashboard shows live sensor streams, EIS health gauge, O₂ production rate, and event log. To test fault recovery: select "Anode Effect" in the Fault Injection panel, set severity, click Inject. Watch the mode badge transition RUN_NOMINAL → FAULT_RECOVERY → RUN_NOMINAL.
