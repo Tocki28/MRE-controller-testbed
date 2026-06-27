@@ -47,29 +47,29 @@ def test_bath_phase_transitions_fe_to_si() -> None:
     with sim._lock:
         sim._state.composition["Fe"] = DEPLETION_THRESHOLDS["Fe"] - 0.01
     state = sim.step(1.0, NOMINAL_SETPOINTS)
-    assert state._bath_phase == "Si"
+    assert state.bath_phase == "Si"
 
 
 def test_bath_phase_transitions_si_to_al_ti() -> None:
     """Internal bath phase transitions Si → Al_Ti when Si oxide drops below threshold."""
     sim = PlantSimulator()
+    sim._bath_phase = "Si"
     with sim._lock:
-        sim._state._bath_phase = "Si"
         sim._state.composition["Si"] = DEPLETION_THRESHOLDS["Si"] - 0.01
     state = sim.step(1.0, NOMINAL_SETPOINTS)
-    assert state._bath_phase == "Al_Ti"
+    assert state.bath_phase == "Al_Ti"
 
 
 def test_bath_phase_transitions_al_ti_to_complete() -> None:
     """Internal bath phase completes when both Al and Ti oxides are depleted."""
     sim = PlantSimulator()
     thresh = DEPLETION_THRESHOLDS["Al_Ti"]
+    sim._bath_phase = "Al_Ti"
     with sim._lock:
-        sim._state._bath_phase = "Al_Ti"
         sim._state.composition["Al"] = thresh - 0.01
         sim._state.composition["Ti"] = thresh - 0.01
     state = sim.step(1.0, NOMINAL_SETPOINTS)
-    assert state._bath_phase == "complete"
+    assert state.bath_phase == "complete"
 
 
 def test_composition_sums_to_one() -> None:
