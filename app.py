@@ -20,11 +20,16 @@ sim.start()
 
 # ── Mode badge colours ──────────────────────────────────────────────────────
 MODE_COLORS = {
-    "RUN_NOMINAL":    "#4CAF50",
-    "HEATING":        "#FF9800",
-    "FAULT_RECOVERY": "#F44336",
-    "SAFE_SHUTDOWN":  "#F44336",
-    "IDLE":           "#9E9E9E",
+    "RUN_NOMINAL":         "#4CAF50",   # green
+    "HEATING":             "#FF9800",   # orange
+    "ELECTRODE_DEGRADING": "#FF5722",   # deep orange
+    "ELECTRODE_SWAP":      "#795548",   # brown — inert swap, no current
+    "BATH_DEPLETED":       "#9C27B0",   # purple
+    "DRAINING":            "#2196F3",   # blue
+    "CLEANOUT":            "#607D8B",   # blue-grey
+    "FAULT_RECOVERY":      "#F44336",   # red
+    "SAFE_SHUTDOWN":       "#F44336",   # red
+    "IDLE":                "#9E9E9E",   # grey
 }
 
 # Faraday constant - used to compute O₂ production rate display
@@ -48,6 +53,9 @@ app.layout = html.Div(
             style={"marginBottom": "8px"},
         ),
         html.Div(id="mode-badge", style={"marginBottom": "12px"}),
+
+        # ── Recipe phase indicator ─────────────────────────────────────────
+        html.Div(id="recipe-panel", style={"marginBottom": "12px"}),
 
         html.Hr(),
 
@@ -279,10 +287,60 @@ def _build_o2_panel(state, comp: dict) -> html.Div:
     ])
 
 
+_RECIPE_STEPS = [
+    ("Fe",    "Phase 1", "Fe₂O₃ reduction",     " 80 A",  "~2.4 V", "#EF5350"),
+    ("Si",    "Phase 2", "SiO₂ reduction",       "120 A",  "~3.6 V", "#42A5F5"),
+    ("Al_Ti", "Phase 3", "Al₂O₃ + TiO₂ reduction", "160 A", "~4.8 V", "#FFA726"),
+]
+_PHASE_ORDER = ["Fe", "Si", "Al_Ti", "complete"]
+
+
+def _build_recipe_panel(bath_phase: str) -> html.Div:
+    current_idx = _PHASE_ORDER.index(bath_phase) if bath_phase in _PHASE_ORDER else 3
+    boxes = []
+    for step_phase, label, desc, current, voltage, color in _RECIPE_STEPS:
+        step_idx = _PHASE_ORDER.index(step_phase)
+        is_active = step_idx == current_idx
+        is_done = step_idx < current_idx
+
+        if is_active:
+            bg, border, text_color = color + "22", f"2px solid {color}", color
+            status = "▶ ACTIVE"
+        elif is_done:
+            bg, border, text_color = "#F5F5F5", "2px solid #CCC", "#999"
+            status = "✓ DONE"
+        else:
+            bg, border, text_color = "#FAFAFA", "1px dashed #DDD", "#BBB"
+            status = "PENDING"
+
+        boxes.append(html.Div(
+            style={
+                "flex": "1", "padding": "10px 14px",
+                "background": bg, "border": border,
+                "borderRadius": "6px", "minWidth": "160px",
+            },
+            children=[
+                html.Div(label, style={"fontWeight": "bold", "color": text_color, "fontSize": "0.9em"}),
+                html.Div(desc, style={"color": text_color, "fontSize": "0.8em", "margin": "2px 0"}),
+                html.Div(
+                    f"{current} · {voltage}",
+                    style={"color": text_color, "fontSize": "0.78em", "fontFamily": "monospace"},
+                ),
+                html.Div(status, style={"color": text_color, "fontSize": "0.75em", "marginTop": "4px", "fontWeight": "bold"}),
+            ],
+        ))
+
+    return html.Div(
+        style={"display": "flex", "gap": "10px", "alignItems": "stretch"},
+        children=boxes,
+    )
+
+
 # ── Callback 1: Main update ──────────────────────────────────────────────────
 @app.callback(
     [
         Output("mode-badge", "children"),
+        Output("recipe-panel", "children"),
         Output("timeseries", "figure"),
         Output("nyquist", "figure"),
         Output("health-gauge", "figure"),
@@ -307,6 +365,7 @@ def update(n):  # noqa: ANN001
     inferred = snap["inferred"]
     mode = snap["mode"]
     history = snap["history"]
+    bath_phase = snap.get("bath_phase", state.bath_phase)
 
     # ── Mode badge ─────────────────────────────────────────────────────────
     badge_color = MODE_COLORS.get(mode, "#9E9E9E")
@@ -505,6 +564,7 @@ def update(n):  # noqa: ANN001
 
     return (
         mode_badge,
+        _build_recipe_panel(bath_phase),
         ts_fig,
         nyq_fig,
         gauge_fig,

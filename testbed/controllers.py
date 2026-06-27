@@ -16,7 +16,16 @@ from testbed.plant import PlantState
 log = structlog.get_logger(__name__)
 
 T_SETPOINT = 1580.0   # °C
-BASE_CURRENT = 150.0  # A nominal target current
+BASE_CURRENT = 150.0  # A nominal target current (fallback)
+
+# Current setpoint per extraction phase.  Higher decomposition potential
+# → higher current → higher cell voltage.  Health scaling is applied on top.
+_PHASE_CURRENT: dict[str, float] = {
+    "Fe":      80.0,   # Fe₂O₃  ~1.3 V decomposition
+    "Si":     120.0,   # SiO₂   ~2.8 V
+    "Al_Ti":  160.0,   # Al₂O₃/TiO₂  ~4.5 V
+    "complete": 40.0,  # wind-down — bath exhausted
+}
 
 
 class HeaterPID:
@@ -49,16 +58,15 @@ class HeaterPID:
 class AdaptiveCurrent:
     """Scale I_cell setpoint down as electrode health falls.
 
-    I_cell_sp = PHASE_BASE * (0.8 * health + 0.2)
-    Phase-aware: each extraction target has a different base current reflecting
-    the decomposition voltage needed to reduce that oxide.
+    I_cell_sp = PHASE_BASE[phase] * (0.8 * health + 0.2)
     """
 
     I_MIN = 10.0
     I_MAX = 200.0
 
-    def compute(self, electrode_health_est: float) -> float:
-        sp = BASE_CURRENT * (0.8 * electrode_health_est + 0.2)
+    def compute(self, electrode_health_est: float, bath_phase: str = "Fe") -> float:
+        base = _PHASE_CURRENT.get(bath_phase, BASE_CURRENT)
+        sp = base * (0.8 * electrode_health_est + 0.2)
         return float(np.clip(sp, self.I_MIN, self.I_MAX))
 
 
@@ -85,13 +93,35 @@ class CompositeController(ControlModule):
 
         if mode == "RUN_NOMINAL":
             hp = self._pid.compute(state.T_bulk, self._dt)
-            i_sp = self._adaptive.compute(health_est)
+            i_sp = self._adaptive.compute(health_est, state.bath_phase)
             return {"heater_power": hp, "I_cell_setpoint": i_sp}
 
         if mode == "FAULT_RECOVERY":
             # Kill current during recovery; keep heater ticking over
             hp = self._pid.compute(state.T_bulk, self._dt)
             return {"heater_power": hp * 0.5, "I_cell_setpoint": 10.0}
+
+        if mode == "ELECTRODE_DEGRADING":
+            health = inferred.get("electrode_health_est", state.electrode_health)
+            I_sp = float(np.clip(self._adaptive.compute(health, state.bath_phase) * 0.5, 10, 200))
+            hp = self._pid.compute(state.T_bulk, self._dt)
+            return {"heater_power": hp, "I_cell_setpoint": I_sp}
+
+        if mode == "ELECTRODE_SWAP":
+            # Electrode being physically replaced: heater holds temperature, no current.
+            hp = self._pid.compute(state.T_bulk, self._dt)
+            return {"heater_power": hp, "I_cell_setpoint": 10.0}
+
+        if mode == "BATH_DEPLETED":
+            hp = self._pid.compute(state.T_bulk, self._dt)
+            return {"heater_power": hp, "I_cell_setpoint": 10.0}
+
+        if mode == "DRAINING":
+            hp = self._pid.compute(state.T_bulk, self._dt)
+            return {"heater_power": hp, "I_cell_setpoint": 10.0}
+
+        if mode == "CLEANOUT":
+            return {"heater_power": 0.0, "I_cell_setpoint": 10.0}
 
         # SAFE_SHUTDOWN or unknown: everything off
         return {"heater_power": 0.0, "I_cell_setpoint": 10.0}
