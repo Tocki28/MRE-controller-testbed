@@ -23,10 +23,10 @@ DEPLETION_THRESHOLDS = {
 }
 
 _DEPLETION_RATE = {
-    "Fe":  0.00055,
-    "Si":  0.00070,
-    "Al":  0.00045,
-    "Ti":  0.00030,
+    "Fe":  0.00165,
+    "Si":  0.00210,
+    "Al":  0.00135,
+    "Ti":  0.00090,
 }
 
 
@@ -50,9 +50,9 @@ class PlantState:
     # Computed from Faraday's law: 2O²⁻ → O₂ + 4e⁻
     O2_produced_mol: float = 0.0     # mol, cumulative
 
-    # Internal bath oxide phase tracker - drives realistic composition drift.
-    # Not surfaced in the dashboard; does not represent pure metal extraction.
-    _bath_phase: str = field(default="Fe", repr=False)
+    # Current extraction phase - which oxide is being preferentially reduced.
+    # Drives the voltage recipe: Fe (low V) → Si (medium V) → Al_Ti (high V).
+    bath_phase: str = "Fe"
 
     # EIS data for the last sweep (stored here so the UI can read it)
     eis_freq: list = field(default_factory=list)
@@ -72,6 +72,7 @@ class PlantSimulator:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._state = PlantState()
+        self._bath_phase: str = "Fe"
         self._rng = np.random.default_rng(seed=42)
 
     # ------------------------------------------------------------------
@@ -136,26 +137,26 @@ class PlantSimulator:
             # The cathode output is always a mixed alloy; this tracks what's
             # left in the bath, not what's been purely extracted.
             comp = dict(s.composition)
-            phase = s._bath_phase
+            phase = self._bath_phase
             I_norm = s.I_cell / 150.0
 
             if phase == "Fe":
                 rate = _DEPLETION_RATE["Fe"] * I_norm * s.faradaic_efficiency
                 comp["Fe"] = max(0.005, comp["Fe"] - rate * dt + rng.normal(0, 0.0002) * dt)
                 if comp["Fe"] < DEPLETION_THRESHOLDS["Fe"]:
-                    s._bath_phase = "Si"
+                    self._bath_phase = "Si"
             elif phase == "Si":
                 rate = _DEPLETION_RATE["Si"] * I_norm * s.faradaic_efficiency
                 comp["Si"] = max(0.005, comp["Si"] - rate * dt + rng.normal(0, 0.0002) * dt)
                 if comp["Si"] < DEPLETION_THRESHOLDS["Si"]:
-                    s._bath_phase = "Al_Ti"
+                    self._bath_phase = "Al_Ti"
             elif phase == "Al_Ti":
                 rate_al = _DEPLETION_RATE["Al"] * I_norm * s.faradaic_efficiency
                 rate_ti = _DEPLETION_RATE["Ti"] * I_norm * s.faradaic_efficiency
                 comp["Al"] = max(0.005, comp["Al"] - rate_al * dt + rng.normal(0, 0.0001) * dt)
                 comp["Ti"] = max(0.005, comp["Ti"] - rate_ti * dt + rng.normal(0, 0.0001) * dt)
                 if comp["Al"] < DEPLETION_THRESHOLDS["Al_Ti"] and comp["Ti"] < DEPLETION_THRESHOLDS["Al_Ti"]:
-                    s._bath_phase = "complete"
+                    self._bath_phase = "complete"
             else:
                 for k in comp:
                     comp[k] = max(0.005, comp[k] + rng.normal(0, 0.0002) * dt)
@@ -164,6 +165,7 @@ class PlantSimulator:
                 comp[k] = max(0.005, comp[k] + rng.normal(0, 0.0001) * dt)
             total = sum(comp.values())
             s.composition = {k: v / total for k, v in comp.items()}
+            s.bath_phase = self._bath_phase
 
             s.uptime_s += dt
             return copy.deepcopy(s)
@@ -183,6 +185,21 @@ class PlantSimulator:
         with self._lock:
             self._state.fault_active = None
             self._fault_multiplier = 1.0
+
+    def reset_for_new_batch(self) -> None:
+        """Reset per-batch state: fresh electrode + fresh feedstock.
+        uptime_s and O2_produced_mol are cumulative — not reset."""
+        with self._lock:
+            self._state.electrode_health = 1.0
+            self._state.composition = {
+                "Fe": 0.20, "Si": 0.30, "Al": 0.22, "Ti": 0.15, "Other": 0.13
+            }
+            self._bath_phase = "Fe"
+            self._state.bath_phase = "Fe"
+            self._state.fault_active = None
+            self._state.eis_freq = []
+            self._state.eis_Z_re = []
+            self._state.eis_Z_im = []
 
     def set_eis_data(self, freq: list, Z_re: list, Z_im: list) -> None:
         with self._lock:
