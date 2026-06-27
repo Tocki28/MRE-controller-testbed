@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 
+import numpy as np
+
 from testbed.plant import PlantState
 
 
@@ -35,9 +37,20 @@ class ControlModule(ABC):
         """
 
 
+class EISDataSource(ABC):
+    """Provides (omega, Z_complex) arrays for a single EIS sweep.
+
+    SyntheticEISSource generates data in-process from plant state.
+    RodeostatEISSource (future, M1.2) acquires from hardware.
+    """
+    @abstractmethod
+    def acquire_spectrum(self, state: "PlantState") -> tuple[np.ndarray, np.ndarray]:
+        """Return (omega [rad/s], Z_complex [Ω]) for one sweep."""
+
+
 class FaultDetector(ABC):
     @abstractmethod
     def detect(
-        self, state: PlantState, history: list[PlantState]
+        self, state: PlantState, history: list[PlantState], inferred: dict | None = None
     ) -> str | None:
         """Return a fault name string if a fault is detected, else None."""
