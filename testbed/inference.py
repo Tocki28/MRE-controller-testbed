@@ -1,8 +1,7 @@
 """EIS-based health inference + OES composition mock + state estimator.
 
-EIS sweep: every 60 sim-seconds generate a synthetic Randles impedance
-spectrum, add noise, fit by least-squares to extract R_ct, normalise
-to a health proxy.
+EIS sweep: every 60 sim-seconds acquire an EIS spectrum via EISDataSource,
+fit by least-squares (scipy TRF) to extract R_ct, normalise to a health proxy.
 
 OES: trivially returns composition from plant state + tiny noise.
 
@@ -11,13 +10,21 @@ State estimator: low-pass (α=0.3) filter on raw health measurement.
 
 from __future__ import annotations
 
-import time
-
 import numpy as np
 import structlog
+from scipy.optimize import least_squares
 
-from testbed.interfaces import InferenceModule
+from testbed.interfaces import EISDataSource, InferenceModule
 from testbed.plant import PlantState
+from testbed.randles_model import (
+    MOE_CDL_BASELINE,
+    MOE_RCT_END,
+    MOE_RCT_NEW,
+    MOE_RS_BASELINE,
+    MOE_SIGMA_BASELINE,
+    moe_frequencies,
+    randles_impedance,
+)
 
 log = structlog.get_logger(__name__)
 
@@ -25,46 +32,85 @@ EIS_INTERVAL_S = 60.0   # sim-seconds between sweeps
 ALPHA = 0.3              # EMA smoothing
 
 
-def _randles_impedance(
-    omega: np.ndarray,
-    Rs: float,
-    Rct: float,
-    Cdl: float,
-) -> np.ndarray:
-    """Forward Randles model: Z(ω) = Rs + Rct / (1 + jω·Rct·Cdl)"""
-    j = 1j
-    return Rs + Rct / (1.0 + j * omega * Rct * Cdl)
+# ---------------------------------------------------------------------------
+# EIS data sources
+# ---------------------------------------------------------------------------
+
+class SyntheticEISSource(EISDataSource):
+    """Generates synthetic Randles impedance from plant state (in-process)."""
+
+    def __init__(self) -> None:
+        self._rng = np.random.default_rng(seed=42)
+
+    def acquire_spectrum(self, state: PlantState) -> tuple[np.ndarray, np.ndarray]:
+        """Return (omega [rad/s], Z_complex [Ω]) for one synthetic sweep."""
+        freq = moe_frequencies()
+        omega = 2.0 * np.pi * freq
+
+        Rs_true = MOE_RS_BASELINE
+        Rct_true = MOE_RCT_NEW + (1.0 - state.electrode_health) * (
+            MOE_RCT_END - MOE_RCT_NEW
+        )
+        Cdl_true = MOE_CDL_BASELINE
+        sigma_true = MOE_SIGMA_BASELINE
+
+        Z_true = randles_impedance(omega, Rs_true, Rct_true, Cdl_true, sigma_true)
+        noise = (
+            self._rng.normal(0, 0.03, size=len(omega))
+            + 1j * self._rng.normal(0, 0.03, size=len(omega))
+        )
+        Z_meas = Z_true + noise
+        return omega, Z_meas
 
 
-def _fit_randles(
+class RodeostatEISSource(EISDataSource):
+    """Hardware EIS source via Rodeostat potentiostat (requires M1.2)."""
+
+    def acquire_spectrum(self, state: PlantState) -> tuple[np.ndarray, np.ndarray]:
+        raise NotImplementedError(
+            "RodeostatEISSource not yet implemented — requires M1.2 hardware"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Randles fitting
+# ---------------------------------------------------------------------------
+
+def fit_randles_scipy(
     omega: np.ndarray, Z_meas: np.ndarray
-) -> tuple[float, float, float]:
-    """Least-squares fit of Randles model to measured (noisy) impedance.
+) -> tuple[float, float, float, float]:
+    """Fit 4-parameter Randles model to measured impedance via scipy TRF.
 
-    Returns (Rs, Rct, Cdl) estimates.
-    Uses a simple grid search over a coarse parameter space - sufficient
-    for the v1 simulation without requiring scipy.
+    Returns (Rs, Rct, Cdl, sigma).
     """
-    best_err = float("inf")
-    best = (0.01, 1.0, 1e-4)
-    for Rs in np.linspace(0.005, 0.1, 8):
-        for Rct in np.linspace(0.1, 10.0, 20):
-            for Cdl in np.logspace(-5, -2, 8):
-                Z_fit = _randles_impedance(omega, Rs, Rct, Cdl)
-                err = float(np.sum(np.abs(Z_meas - Z_fit) ** 2))
-                if err < best_err:
-                    best_err = err
-                    best = (Rs, Rct, Cdl)
-    return best
+    x0 = [MOE_RS_BASELINE, MOE_RCT_NEW * 1.5, MOE_CDL_BASELINE, MOE_SIGMA_BASELINE]
+    lower = [0.01, 0.1, 1e-6, 0.01]
+    upper = [20.0, 200.0, 1e-2, 50.0]
 
+    def residuals(x: list[float]) -> np.ndarray:
+        Z_fit = randles_impedance(omega, x[0], x[1], x[2], x[3])
+        diff = Z_fit - Z_meas
+        return np.concatenate([diff.real, diff.imag])
+
+    result = least_squares(residuals, x0, bounds=(lower, upper), method="trf")
+    Rs, Rct, Cdl, sigma = result.x
+    return float(Rs), float(Rct), float(Cdl), float(sigma)
+
+
+# ---------------------------------------------------------------------------
+# Inference module
+# ---------------------------------------------------------------------------
 
 class MOEInference(InferenceModule):
     """Composed inference module: EIS + OES + EMA state estimator."""
 
-    RCT_NEW = 0.5    # Ω - nominal Rct for a fresh electrode
-    RCT_END = 5.0    # Ω - Rct at end-of-life
+    RCT_NEW = MOE_RCT_NEW    # Ω - nominal Rct for a fresh electrode
+    RCT_END = MOE_RCT_END    # Ω - Rct at end-of-life
 
-    def __init__(self) -> None:
+    def __init__(self, eis_source: EISDataSource | None = None) -> None:
+        self._eis_source: EISDataSource = (
+            eis_source if eis_source is not None else SyntheticEISSource()
+        )
         self._last_eis_time: float = -999.0
         self._health_est: float = 1.0
         self._health_history: list[float] = []
@@ -77,6 +123,13 @@ class MOEInference(InferenceModule):
         self._predicted_ttf: float = 999.0
 
     # ------------------------------------------------------------------
+
+    def reset_for_new_batch(self) -> None:
+        """Reset health estimate so dashboard shows 1.0 for the fresh electrode."""
+        self._health_est = 1.0
+        self._health_history = []
+        self._last_eis_time = -999.0
+        self._predicted_ttf = 999.0
 
     def update(self, state: PlantState) -> dict:
         needs_sweep = (state.uptime_s - self._last_eis_time) >= EIS_INTERVAL_S
@@ -118,25 +171,11 @@ class MOEInference(InferenceModule):
     # ------------------------------------------------------------------
 
     def _run_eis_sweep(self, state: PlantState) -> None:
-        """Generate synthetic EIS data, fit Randles, update health estimate."""
-        freq = np.logspace(-2, 4, 50)   # 0.01 Hz → 10 kHz
-        omega = 2.0 * np.pi * freq
+        """Acquire EIS spectrum, fit Randles, update health estimate."""
+        omega, Z_meas = self._eis_source.acquire_spectrum(state)
+        freq = omega / (2.0 * np.pi)
 
-        # True parameters: Rct scales with degradation (health ↓ → Rct ↑)
-        true_Rct = self.RCT_NEW + (1.0 - state.electrode_health) * (
-            self.RCT_END - self.RCT_NEW
-        )
-        Rs_true = 0.015
-        Cdl_true = 1e-4
-
-        Z_true = _randles_impedance(omega, Rs_true, true_Rct, Cdl_true)
-        noise = self._rng.normal(0, 0.03, size=len(omega)) + 1j * self._rng.normal(
-            0, 0.03, size=len(omega)
-        )
-        Z_meas = Z_true + noise
-
-        # Fit to extract Rct
-        _, Rct_fit, _ = _fit_randles(omega, Z_meas)
+        _, Rct_fit, _, _ = fit_randles_scipy(omega, Z_meas)
 
         # Normalise Rct → health proxy (inverted and clamped)
         raw = 1.0 - (Rct_fit - self.RCT_NEW) / (self.RCT_END - self.RCT_NEW)
