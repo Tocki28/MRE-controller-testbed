@@ -563,3 +563,28 @@ class TestSimLoopMiscellaneous:
         snap2 = sim.get_snapshot()
         o2_end = snap2["state"].O2_produced_mol
         assert o2_end > o2_start, "O2 production did not advance"
+
+
+# ---------------------------------------------------------------------------
+# Test 9 — All three extraction phases seen (integration, slow)
+# ---------------------------------------------------------------------------
+
+def test_phase_transitions_all_seen():
+    """Drive SimLoop until all 3 phase transitions complete."""
+    loop = SimLoop()
+    loop.start()
+    deadline = time.monotonic() + 300  # 300 real-seconds max (SimLoop runs at 5 sim-s/wall-s)
+    phases_seen = set()
+    try:
+        while time.monotonic() < deadline:
+            snap = loop.get_snapshot()
+            if snap:
+                phases_seen.add(snap.get("bath_phase", "Fe"))
+                if "complete" in phases_seen:
+                    break
+            time.sleep(0.5)
+    finally:
+        loop.stop()
+    assert "Si" in phases_seen, "Never transitioned to Si phase"
+    assert "Al_Ti" in phases_seen, "Never transitioned to Al_Ti phase"
+    assert "complete" in phases_seen, "Never completed all phases"

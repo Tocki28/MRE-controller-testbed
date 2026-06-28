@@ -49,7 +49,7 @@ app.layout = html.Div(
 
         # ── Header ────────────────────────────────────────────────────────
         html.H2(
-            "MRE Feedback Controller - Live Simulation",
+            "MRE Autonomous Controller — Lunar Regolith Electrolysis",
             style={"marginBottom": "8px"},
         ),
         html.Div(id="mode-badge", style={"marginBottom": "12px"}),
@@ -200,6 +200,24 @@ app.layout = html.Div(
                 "lineHeight": "1.8",
             },
         ),
+
+        html.Hr(),
+
+        # ── Footer: chemistry note ───────────────────────────────────────────
+        html.Div(
+            "Chemistry note: Cathode output is always a mixed Fe/Si/Al/Ti alloy — voltage does "
+            "not select which metal is reduced. The brain adapts current setpoint as the bath "
+            "depletes. Pure metal separation requires a second downstream process.",
+            style={
+                "color": "#888",
+                "fontSize": "0.78em",
+                "fontStyle": "italic",
+                "background": "#F5F5F5",
+                "padding": "10px 14px",
+                "borderRadius": "4px",
+                "marginTop": "12px",
+            },
+        ),
     ],
 )
 
@@ -288,9 +306,9 @@ def _build_o2_panel(state, comp: dict) -> html.Div:
 
 
 _RECIPE_STEPS = [
-    ("Fe",    "Phase 1", "Fe₂O₃ reduction",     " 80 A",  "~2.4 V", "#EF5350"),
-    ("Si",    "Phase 2", "SiO₂ reduction",       "120 A",  "~3.6 V", "#42A5F5"),
-    ("Al_Ti", "Phase 3", "Al₂O₃ + TiO₂ reduction", "160 A", "~4.8 V", "#FFA726"),
+    ("Fe",    "Phase 1", "Fe-rich bath — brain sets low current, O₂ production begins",    " 80 A",  "~2.4 V", "#EF5350"),
+    ("Si",    "Phase 2", "Si-dominant bath — brain raises current, O₂ rate increasing",    "120 A",  "~3.6 V", "#42A5F5"),
+    ("Al_Ti", "Phase 3", "Al/Ti-rich bath — brain at peak current, propellant precursor yield", "160 A", "~4.8 V", "#FFA726"),
 ]
 _PHASE_ORDER = ["Fe", "Si", "Al_Ti", "complete"]
 

@@ -57,6 +57,7 @@ class SimLoop:
         self._pre_fault_mode: str = "RUN_NOMINAL"
         self._last_bath_phase: str = "Fe"
         self._started = False
+        self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
 
     # ------------------------------------------------------------------
@@ -71,6 +72,12 @@ class SimLoop:
         self._thread = t
         t.start()
         log.info("sim_loop_started")
+
+    def stop(self) -> None:
+        """Signal the background loop to stop and wait for it to exit."""
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
 
     def get_snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -87,7 +94,7 @@ class SimLoop:
 
         setpoints: dict = {"heater_power": 5000.0, "I_cell_setpoint": 10.0}
 
-        while True:
+        while not self._stop_event.is_set():
             tick_start = time.monotonic()
             mode = self.mode_manager.mode
 

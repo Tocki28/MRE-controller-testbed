@@ -78,3 +78,46 @@ def test_composition_sums_to_one() -> None:
     for _ in range(50):
         state = sim.step(1.0, NOMINAL_SETPOINTS)
     assert abs(sum(state.composition.values()) - 1.0) < 1e-6
+
+
+def test_all_three_phases_complete():
+    """Drive plant at high current until all 3 phase transitions complete."""
+    from testbed.plant import PlantSimulator
+    plant = PlantSimulator()
+    phases_seen = set()
+    setpoints = {"heater_power": 8000.0, "I_cell_setpoint": 160.0}
+    for _ in range(20000):  # 20000 sim-seconds max
+        state = plant.step(dt=1.0, setpoints=setpoints)
+        phases_seen.add(state.bath_phase)
+        if state.bath_phase == "complete":
+            break
+    assert "Fe" in phases_seen
+    assert "Si" in phases_seen
+    assert "Al_Ti" in phases_seen
+    assert "complete" in phases_seen
+
+
+def test_fault_inject_recover_o2_resumes():
+    """Fault during Si phase: after clear, O2 production resumes within 5 s."""
+    from testbed.plant import PlantSimulator
+    plant = PlantSimulator()
+    setpoints = {"heater_power": 8000.0, "I_cell_setpoint": 160.0}
+
+    # Drive to Si phase
+    for _ in range(20000):
+        state = plant.step(dt=1.0, setpoints=setpoints)
+        if state.bath_phase == "Si":
+            break
+    assert state.bath_phase == "Si", "Never reached Si phase"
+
+    # Inject fault, run 15 s
+    plant.apply_fault("anode_effect", multiplier=3.5)
+    for _ in range(15):
+        state = plant.step(dt=1.0, setpoints=setpoints)
+
+    # Clear fault, run 5 s, assert O2 increases
+    plant.clear_fault()
+    o2_before = state.O2_produced_mol
+    for _ in range(5):
+        state = plant.step(dt=1.0, setpoints=setpoints)
+    assert state.O2_produced_mol > o2_before, "O2 did not resume after fault clear"
