@@ -1,0 +1,16 @@
+{
+  "run_params": {
+    "dt_s": 1.0,
+    "n_steps": 1000,
+    "heater_power_W": 5000.0,
+    "I_cell_setpoint_A": 100.0,
+    "plant_seed": 42
+  },
+  "metrics": {
+    "O2_produced_mol": 0.1992059577450892,
+    "electrode_health_final": 0.800000000000022,
+    "phase_transitions": 2,
+    "total_energy_J": 334641.75851398846
+  },
+  "generated_at": "2026-06-28T04:31:52.558194+00:00"
+}
