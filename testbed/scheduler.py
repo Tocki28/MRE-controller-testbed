@@ -27,6 +27,22 @@ log = structlog.get_logger(__name__)
 # How many seconds to hold in FAULT_RECOVERY before returning to nominal
 RECOVERY_HOLD_S = 10.0
 
+# Maps fault detector / injector names to the named M5.2 state-machine trigger.
+# Falls back to the generic "fault_detected" trigger for unknown names.
+_FAULT_TRIGGER_MAP: dict[str, str] = {
+    "anode_burnout":         "anode_burnout_detected",
+    "melt_freeze":           "melt_freeze_detected",
+    "electrode_short":       "electrode_short_detected",
+    "bath_depletion":        "bath_depletion_detected",
+    "power_loss":            "power_loss_detected",
+    "sensor_dropout":        "sensor_dropout_detected",
+    "cathode_flooding":      "cathode_flooding_detected",
+    "offgas_blockage":       "offgas_blockage_detected",
+    # legacy detector names → nearest named trigger
+    "anode_effect":          "anode_burnout_detected",
+    "electrode_degradation": "electrode_short_detected",
+}
+
 # Wall-clock sleep between ticks (controls dashboard refresh rate)
 TICK_WALL_S = 0.2   # 5 ticks/s wall-clock = 1 sim-s per tick at 5x speed
 
@@ -144,9 +160,10 @@ class SimLoop:
                     fault = self.electrode_degradation_detector.detect(state, history_list, inferred)
                 if fault:
                     self._pre_fault_mode = mode
-                    self.mode_manager.safe_trigger("fault_detected")
+                    trigger = _FAULT_TRIGGER_MAP.get(fault, "fault_detected")
+                    self.mode_manager.safe_trigger(trigger, fault_name=fault)
                     self._fault_recovery_start = state.uptime_s
-                    log.error("fault_detected", fault=fault, mode=mode, V_cell=round(state.V_cell, 2))
+                    log.error("fault_detected", fault=fault, trigger=trigger, mode=mode, V_cell=round(state.V_cell, 2))
                     mode = self.mode_manager.mode
 
             # --- 5. Recovery timer -----------------------------------
@@ -154,6 +171,7 @@ class SimLoop:
                 elapsed = state.uptime_s - self._fault_recovery_start
                 if elapsed >= RECOVERY_HOLD_S:
                     self.fault_injector.clear()
+                    self.mode_manager.clear_active_fault()
                     self._fault_recovery_start = None
                     failed_in_window = sum(self._recovery_outcomes)
                     if failed_in_window >= 3:
@@ -222,6 +240,7 @@ class SimLoop:
                     "mode": mode,
                     "history": history_list[-60:],
                     "bath_phase": state.bath_phase,
+                    "active_fault": self.mode_manager.active_fault,
                 }
 
             # --- Wall-clock pacing -----------------------------------

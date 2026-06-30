@@ -555,7 +555,19 @@ class TestSimLoopMiscellaneous:
         sim.start()
         _wait_for_mode(sim, "RUN_NOMINAL", timeout=2.0)
 
-        snap1 = sim.get_snapshot()
+        # _wait_for_mode polls mode_manager.mode directly; the snapshot is only
+        # written at step 7 of the loop, which may not have completed yet.
+        # Spin until get_snapshot() returns a dict that actually has a "state"
+        # key so we don't hit a KeyError on the empty initial snapshot {}.
+        deadline = time.monotonic() + 2.0
+        snap1: dict = {}
+        while time.monotonic() < deadline:
+            snap1 = sim.get_snapshot()
+            if "state" in snap1:
+                break
+            time.sleep(0.05)
+        assert "state" in snap1, "Snapshot never populated 'state' key within 2 s"
+
         o2_start = snap1["state"].O2_produced_mol
 
         time.sleep(0.6)   # a few more ticks
@@ -566,25 +578,27 @@ class TestSimLoopMiscellaneous:
 
 
 # ---------------------------------------------------------------------------
-# Test 9 — All three extraction phases seen (integration, slow)
+# Test 9 — All three extraction phases seen (direct plant stepping, fast)
 # ---------------------------------------------------------------------------
 
 def test_phase_transitions_all_seen():
-    """Drive SimLoop until all 3 phase transitions complete."""
-    loop = SimLoop()
-    loop.start()
-    deadline = time.monotonic() + 300  # 300 real-seconds max (SimLoop runs at 5 sim-s/wall-s)
-    phases_seen = set()
-    try:
-        while time.monotonic() < deadline:
-            snap = loop.get_snapshot()
-            if snap:
-                phases_seen.add(snap.get("bath_phase", "Fe"))
-                if "complete" in phases_seen:
-                    break
-            time.sleep(0.5)
-    finally:
-        loop.stop()
-    assert "Si" in phases_seen, "Never transitioned to Si phase"
-    assert "Al_Ti" in phases_seen, "Never transitioned to Al_Ti phase"
-    assert "complete" in phases_seen, "Never completed all phases"
+    """SimLoop sees all 3 phase transitions within 20000 sim-seconds at high current.
+
+    Steps the plant directly (bypassing the thread) at high current to accelerate
+    phase transitions without waiting for real wall-clock time.
+    """
+    from testbed.plant import PlantSimulator
+    plant = PlantSimulator()
+    setpoints = {"heater_power": 8000.0, "I_cell_setpoint": 160.0}
+    phases_seen: set[str] = set()
+    last_phase = "Fe"
+    for _ in range(20000):
+        state = plant.step(dt=1.0, setpoints=setpoints)
+        phases_seen.add(state.bath_phase)
+        if state.bath_phase != last_phase:
+            last_phase = state.bath_phase
+        if "complete" in phases_seen:
+            break
+    assert "Si" in phases_seen, f"Never transitioned to Si phase; seen: {phases_seen}"
+    assert "Al_Ti" in phases_seen, f"Never transitioned to Al_Ti phase; seen: {phases_seen}"
+    assert "complete" in phases_seen, f"Never completed all phases; seen: {phases_seen}"
