@@ -300,3 +300,45 @@ class TestCompositeControllerModes:
         result = ctrl.compute_setpoints(state, {"electrode_health_est": 1.0}, "TOTALLY_UNKNOWN")
         assert result["heater_power"] == pytest.approx(0.0)
         assert result["I_cell_setpoint"] == pytest.approx(10.0)
+
+
+# ---------------------------------------------------------------------------
+# TemperaturePID — step response and anti-windup
+# ---------------------------------------------------------------------------
+
+def test_pid_step_response():
+    from testbed.plant import PlantSimulator
+    from testbed.controllers import TemperaturePID
+    T_SP = 1700.0
+    pid = TemperaturePID(T_setpoint=T_SP)
+    plant = PlantSimulator()
+    dt = 1.0
+    T_history = []
+    state = plant.get_state()
+    for _ in range(300):
+        hp = pid.compute(state.T_bulk, dt)
+        state = plant.step(dt=dt, setpoints={"heater_power": hp, "I_cell_setpoint": 10.0})
+        T_history.append(state.T_bulk)
+    # Must reach setpoint ± 5°C within 200 s
+    reached = any(abs(T - T_SP) <= 5.0 for T in T_history[:200])
+    assert reached, f"PID did not reach {T_SP} ± 5°C within 200 s"
+    # Steady-state error at 300 s
+    ss_error = abs(T_history[-1] - T_SP)
+    assert ss_error <= 5.0, f"Steady-state error {ss_error:.1f} °C > 5 °C"
+
+
+def test_pid_no_windup_on_large_step():
+    from testbed.plant import PlantSimulator
+    from testbed.controllers import TemperaturePID
+    T_SP = 2000.0
+    pid = TemperaturePID(T_setpoint=T_SP)
+    plant = PlantSimulator()
+    dt = 1.0
+    state = plant.get_state()
+    peak_T = state.T_bulk
+    for _ in range(500):
+        hp = pid.compute(state.T_bulk, dt)
+        assert hp <= 10_000.0
+        state = plant.step(dt=dt, setpoints={"heater_power": hp, "I_cell_setpoint": 10.0})
+        peak_T = max(peak_T, state.T_bulk)
+    assert peak_T <= T_SP + 100.0, f"Overshoot too large: {peak_T:.1f}"

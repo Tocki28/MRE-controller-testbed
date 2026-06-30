@@ -55,6 +55,54 @@ class HeaterPID:
         return float(np.clip(output, self.OUT_MIN, self.OUT_MAX))
 
 
+class TemperaturePID:
+    """Discrete-time PID on T_bulk → heater_power with configurable setpoint.
+
+    Identical gains to HeaterPID but accepts the setpoint at construction time,
+    making it reusable across different target temperatures.
+
+    Anti-windup: integral is clamped to [-OUT_MAX, OUT_MAX] before multiplication.
+    """
+
+    KP = 200.0
+    KI = 5.0
+    KD = 10.0
+    OUT_MIN = 0.0
+    OUT_MAX = 10_000.0
+
+    def __init__(self, T_setpoint: float) -> None:
+        self._T_setpoint = T_setpoint
+        self._integral = 0.0
+        self._prev_error = 0.0
+
+    def compute(self, T_bulk: float, dt: float) -> float:
+        """Return heater_power in [OUT_MIN, OUT_MAX].
+
+        Anti-windup: integral only accumulates when the pre-integration output
+        would not be saturated, preventing integrator windup during large steps.
+        The integral is also clamped to [-OUT_MAX, OUT_MAX] as a hard backstop.
+        """
+        error = self._T_setpoint - T_bulk
+        derivative = (error - self._prev_error) / max(dt, 1e-6)
+        self._prev_error = error
+
+        # Tentative output without integrating yet
+        tentative = self.KP * error + self.KI * self._integral + self.KD * derivative
+        # Only integrate when not saturated (conditional anti-windup)
+        if self.OUT_MIN < tentative < self.OUT_MAX:
+            self._integral = float(
+                np.clip(self._integral + error * dt, -self.OUT_MAX, self.OUT_MAX)
+            )
+
+        output = self.KP * error + self.KI * self._integral + self.KD * derivative
+        return float(np.clip(output, self.OUT_MIN, self.OUT_MAX))
+
+    def reset(self) -> None:
+        """Zero integral accumulator and previous error."""
+        self._integral = 0.0
+        self._prev_error = 0.0
+
+
 class AdaptiveCurrent:
     """Scale I_cell setpoint down as electrode health falls.
 
