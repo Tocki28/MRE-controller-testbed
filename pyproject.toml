@@ -9,6 +9,7 @@ dependencies = [
     "impedance>=0.9",
     "transitions>=0.9",
     "structlog>=24.1",
+    "pyserial>=3.0",
 ]
 
 [project.optional-dependencies]
