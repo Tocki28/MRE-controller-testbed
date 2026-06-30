@@ -13,6 +13,23 @@ from plotly.subplots import make_subplots
 from testbed.logging_setup import configure_logging, get_recent_events
 from testbed.scheduler import SimLoop
 
+import argparse
+import os
+import time
+import threading
+from datetime import datetime, timezone
+
+import numpy as np
+import serial
+
+from testbed.eis_analysis import (
+    EISBuffer,
+    SweepParser,
+    extract_analytical_params,
+    fit_randles,
+)
+from testbed.randles_model import randles_impedance
+
 # Boot the simulator once at module level (not inside a callback)
 configure_logging()
 sim = SimLoop()
@@ -37,6 +54,60 @@ _FARADAY = 96_485.0
 _O2_MOLAR_MASS = 32.0  # g/mol
 
 
+# ── EIS serial configuration ─────────────────────────────────────────────────
+def _get_eis_port() -> str:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--eis-port", default=None)
+    args, _ = parser.parse_known_args()
+    return args.eis_port or os.environ.get("EIS_PORT", "/dev/ttyUSB0")
+
+
+EIS_PORT = _get_eis_port()
+EIS_BAUD = 115_200
+STALE_THRESHOLD_S = 30
+
+
+class SerialEISReader(threading.Thread):
+    """Daemon thread: reads UART CSV from STM32, assembles sweeps into EISBuffer."""
+
+    def __init__(self, port: str, baud: int, buffer: EISBuffer) -> None:
+        super().__init__(daemon=True)
+        self.port = port
+        self.baud = baud
+        self.buffer = buffer
+        self._parser = SweepParser()
+
+    def run(self) -> None:
+        while True:
+            try:
+                with serial.Serial(self.port, self.baud, timeout=1.0) as ser:
+                    self._parser = SweepParser()
+                    self.buffer.set_status("NO_DATA")
+                    while True:
+                        raw = ser.readline().decode("ascii", errors="replace")
+                        if not raw:
+                            continue
+                        self._parser.parse_line(raw)
+                        if self._parser.is_complete_after(raw):
+                            sweep = self._parser.get_sweep()
+                            if sweep:
+                                sweep["analytical"] = extract_analytical_params(
+                                    sweep["freq"], sweep["Z_re"], sweep["Z_im"]
+                                )
+                                sweep["fit"] = fit_randles(
+                                    sweep["freq"], sweep["Z_re"], sweep["Z_im"]
+                                )
+                                self.buffer.add_sweep(sweep)
+            except Exception as exc:  # noqa: BLE001
+                self.buffer.set_error(str(exc))
+                time.sleep(2.0)
+
+
+eis_buffer = EISBuffer()
+_eis_reader = SerialEISReader(EIS_PORT, EIS_BAUD, eis_buffer)
+_eis_reader.start()
+
+
 # ── App ─────────────────────────────────────────────────────────────────────
 app = dash.Dash(__name__)
 
@@ -54,7 +125,7 @@ app.layout = html.Div(
         ),
         html.Div(id="mode-badge", style={"marginBottom": "12px"}),
 
-        # ── Recipe phase indicator ─────────────────────────────────────────
+        # ── Bath Composition ───────────────────────────────────────────────
         html.Div(id="recipe-panel", style={"marginBottom": "12px"}),
 
         html.Hr(),
@@ -151,8 +222,17 @@ app.layout = html.Div(
             children=[
                 dcc.Dropdown(
                     id="fault-type",
-                    options=[{"label": "Anode Effect", "value": "anode_effect"}],
-                    value="anode_effect",
+                    options=[
+                        {"label": "Anode Burnout",    "value": "anode_burnout"},
+                        {"label": "Power Loss",       "value": "power_loss"},
+                        {"label": "Melt Freeze",      "value": "melt_freeze"},
+                        {"label": "Electrode Short",  "value": "electrode_short"},
+                        {"label": "Bath Depletion",   "value": "bath_depletion"},
+                        {"label": "Sensor Dropout",   "value": "sensor_dropout"},
+                        {"label": "Cathode Flooding", "value": "cathode_flooding"},
+                        {"label": "Off-gas Blockage", "value": "offgas_blockage"},
+                    ],
+                    value="melt_freeze",
                     clearable=False,
                     style={"width": "200px"},
                 ),
@@ -205,9 +285,9 @@ app.layout = html.Div(
 
         # ── Footer: chemistry note ───────────────────────────────────────────
         html.Div(
-            "Chemistry note: Cathode output is always a mixed Fe/Si/Al/Ti alloy — voltage does "
-            "not select which metal is reduced. The brain adapts current setpoint as the bath "
-            "depletes. Pure metal separation requires a second downstream process.",
+            "Chemistry note: Cathode output is always a mixed Fe/Si/Al/Ti alloy — not pure "
+            "sequential metals. Sequential voltage recipe controls which oxides are preferentially "
+            "reduced. Pure metal separation requires downstream refining.",
             style={
                 "color": "#888",
                 "fontSize": "0.78em",
@@ -218,6 +298,46 @@ app.layout = html.Div(
                 "marginTop": "12px",
             },
         ),
+
+        html.Hr(),
+
+        # ── EIS Status bar ──────────────────────────────────────────────────
+        html.Div(id="eis-status-bar", style={"marginBottom": "12px"}),
+
+        html.H3("EIS — Live Hardware Data", style={"marginBottom": "8px"}),
+
+        # ── Section EIS-1: Impedance plots ──────────────────────────────────
+        html.Div(
+            style={"display": "flex", "gap": "16px", "alignItems": "flex-start", "marginBottom": "16px"},
+            children=[
+                html.Div(style={"flex": "1"}, children=[
+                    html.H5("Nyquist", style={"margin": "0 0 4px 0", "color": "#555"}),
+                    dcc.Graph(id="eis-nyquist", config={"displayModeBar": False}),
+                ]),
+                html.Div(style={"flex": "1"}, children=[
+                    html.H5("Bode — |Z|", style={"margin": "0 0 4px 0", "color": "#555"}),
+                    dcc.Graph(id="eis-bode-mag", config={"displayModeBar": False}),
+                ]),
+                html.Div(style={"flex": "1"}, children=[
+                    html.H5("Bode — Phase", style={"margin": "0 0 4px 0", "color": "#555"}),
+                    dcc.Graph(id="eis-bode-phase", config={"displayModeBar": False}),
+                ]),
+            ],
+        ),
+
+        html.Hr(),
+
+        # ── Section EIS-2: Parameter cards ──────────────────────────────────
+        html.Div(id="eis-params", style={"marginBottom": "16px"}),
+
+        html.Hr(),
+
+        # ── Section EIS-3: Time series ──────────────────────────────────────
+        html.H4("EIS Parameter Timeline (last 100 sweeps)", style={"marginBottom": "8px"}),
+        dcc.Graph(id="eis-timeseries", config={"displayModeBar": False}),
+
+        # Interval driver for EIS (separate from simulation 1 s tick)
+        dcc.Interval(id="eis-tick", interval=2000, n_intervals=0),
     ],
 )
 
@@ -305,53 +425,45 @@ def _build_o2_panel(state, comp: dict) -> html.Div:
     ])
 
 
-_RECIPE_STEPS = [
-    ("Fe",    "Phase 1", "Fe-rich bath — brain sets low current, O₂ production begins",    " 80 A",  "~2.4 V", "#EF5350"),
-    ("Si",    "Phase 2", "Si-dominant bath — brain raises current, O₂ rate increasing",    "120 A",  "~3.6 V", "#42A5F5"),
-    ("Al_Ti", "Phase 3", "Al/Ti-rich bath — brain at peak current, propellant precursor yield", "160 A", "~4.8 V", "#FFA726"),
-]
-_PHASE_ORDER = ["Fe", "Si", "Al_Ti", "complete"]
-
-
-def _build_recipe_panel(bath_phase: str) -> html.Div:
-    current_idx = _PHASE_ORDER.index(bath_phase) if bath_phase in _PHASE_ORDER else 3
-    boxes = []
-    for step_phase, label, desc, current, voltage, color in _RECIPE_STEPS:
-        step_idx = _PHASE_ORDER.index(step_phase)
-        is_active = step_idx == current_idx
-        is_done = step_idx < current_idx
-
-        if is_active:
-            bg, border, text_color = color + "22", f"2px solid {color}", color
-            status = "▶ ACTIVE"
-        elif is_done:
-            bg, border, text_color = "#F5F5F5", "2px solid #CCC", "#999"
-            status = "✓ DONE"
-        else:
-            bg, border, text_color = "#FAFAFA", "1px dashed #DDD", "#BBB"
-            status = "PENDING"
-
-        boxes.append(html.Div(
-            style={
-                "flex": "1", "padding": "10px 14px",
-                "background": bg, "border": border,
-                "borderRadius": "6px", "minWidth": "160px",
-            },
-            children=[
-                html.Div(label, style={"fontWeight": "bold", "color": text_color, "fontSize": "0.9em"}),
-                html.Div(desc, style={"color": text_color, "fontSize": "0.8em", "margin": "2px 0"}),
-                html.Div(
-                    f"{current} · {voltage}",
-                    style={"color": text_color, "fontSize": "0.78em", "fontFamily": "monospace"},
-                ),
-                html.Div(status, style={"color": text_color, "fontSize": "0.75em", "marginTop": "4px", "fontWeight": "bold"}),
-            ],
-        ))
-
-    return html.Div(
-        style={"display": "flex", "gap": "10px", "alignItems": "stretch"},
-        children=boxes,
-    )
+def _build_bath_composition_panel(composition: dict) -> html.Div:
+    SPECIES = [
+        ("Fe",    "Fe₂O₃", "#EF5350", 0.04),
+        ("Si",    "SiO₂",  "#42A5F5", 0.06),
+        ("Al",    "Al₂O₃", "#FFA726", 0.04),
+        ("Ti",    "TiO₂",  "#66BB6A", 0.04),
+        ("Other", "Other",  "#BDBDBD", None),
+    ]
+    rows = []
+    for key, label, color, threshold in SPECIES:
+        frac = composition.get(key, 0.0)
+        pct = frac * 100
+        depleted = threshold is not None and frac <= threshold
+        label_color = "#999" if depleted else "#333"
+        badge = html.Span(" ⬤ depleted", style={"color": "#999", "fontSize": "0.72em"}) if depleted else ""
+        rows.append(html.Div(style={"marginBottom": "8px"}, children=[
+            html.Div(style={"display": "flex", "justifyContent": "space-between", "marginBottom": "2px"}, children=[
+                html.Span(label, style={"fontSize": "0.82em", "color": label_color, "fontWeight": "500"}),
+                html.Span([f"{pct:.1f}%", badge], style={"fontSize": "0.82em", "color": label_color}),
+            ]),
+            html.Div(style={"position": "relative", "background": "#F0F0F0", "borderRadius": "4px", "height": "10px", "overflow": "visible"}, children=[
+                html.Div(style={
+                    "width": f"{max(0.0, min(pct, 100)):.1f}%",
+                    "background": color if not depleted else "#CCCCCC",
+                    "height": "10px", "borderRadius": "4px",
+                    "transition": "width 0.3s ease",
+                }),
+                # Depletion threshold tick
+                *([html.Div(style={
+                    "position": "absolute", "top": "-3px", "bottom": "-3px",
+                    "left": f"{max(0.0, min(threshold * 100, 100)):.1f}%",
+                    "width": "2px", "background": "#999", "borderRadius": "1px",
+                })] if threshold else []),
+            ]),
+        ]))
+    return html.Div([
+        html.Div("Bath Oxide Composition", style={"fontWeight": "600", "fontSize": "0.88em", "color": "#555", "marginBottom": "10px", "textTransform": "uppercase", "letterSpacing": "0.05em"}),
+        *rows,
+    ])
 
 
 # ── Callback 1: Main update ──────────────────────────────────────────────────
@@ -383,8 +495,6 @@ def update(n):  # noqa: ANN001
     inferred = snap["inferred"]
     mode = snap["mode"]
     history = snap["history"]
-    bath_phase = snap.get("bath_phase", state.bath_phase)
-
     # ── Mode badge ─────────────────────────────────────────────────────────
     badge_color = MODE_COLORS.get(mode, "#9E9E9E")
     uptime_s = int(state.uptime_s)
@@ -575,14 +685,17 @@ def update(n):  # noqa: ANN001
         event_log = html.Span("No events yet…", style={"color": "grey"})
 
     # ── Fault status ────────────────────────────────────────────────────────
-    if state.fault_active:
-        fault_status = f"Active fault: {state.fault_active} - V_cell = {state.V_cell:.2f} V"
+    active_fault = snap.get("active_fault")
+    if active_fault:
+        fault_status = f"Active fault: {active_fault} — V_cell = {state.V_cell:.2f} V  |  Mode: {mode}"
+    elif state.fault_active:
+        fault_status = f"Active fault: {state.fault_active} — V_cell = {state.V_cell:.2f} V"
     else:
         fault_status = ""
 
     return (
         mode_badge,
-        _build_recipe_panel(bath_phase),
+        _build_bath_composition_panel(state.composition),
         ts_fig,
         nyq_fig,
         gauge_fig,
@@ -609,6 +722,8 @@ def update(n):  # noqa: ANN001
 def on_inject(n_clicks, fault_type, severity):  # noqa: ANN001
     if n_clicks:
         sim.fault_injector.inject(fault_type, severity)
+        trigger = f"{fault_type}_detected"
+        sim.mode_manager.safe_trigger(trigger, fault_name=fault_type)
     return f"Injected: {fault_type} (severity {severity})"
 
 
@@ -621,7 +736,266 @@ def on_inject(n_clicks, fault_type, severity):  # noqa: ANN001
 def on_clear(n_clicks):  # noqa: ANN001
     if n_clicks:
         sim.fault_injector.clear()
+        sim.mode_manager.clear_active_fault()
     return "Fault cleared"
+
+
+# ── EIS helpers ──────────────────────────────────────────────────────────────
+
+def _fmt(val: object, fmt: str = ".2f", suffix: str = "") -> str:
+    """Format a numeric value or return '---' for None."""
+    if val is None:
+        return "---"
+    return f"{val:{fmt}}{suffix}"
+
+
+def _residual_badge(residual: float) -> html.Span:
+    pct = residual * 100
+    color = "#4CAF50" if pct < 5 else "#FF9800" if pct < 15 else "#F44336"
+    return html.Span(
+        f"Fit residual: {pct:.1f}%",
+        style={
+            "background": color, "color": "white",
+            "padding": "2px 10px", "borderRadius": "4px",
+            "fontSize": "0.85em", "marginLeft": "12px",
+        },
+    )
+
+
+def _param_card(label: str, value: str, unit: str = "") -> html.Div:
+    return html.Div(
+        style={
+            "background": "#F9F9F9", "border": "1px solid #E0E0E0",
+            "borderRadius": "6px", "padding": "10px 14px",
+            "minWidth": "120px", "textAlign": "center",
+        },
+        children=[
+            html.Div(label, style={"color": "#888", "fontSize": "0.75em", "marginBottom": "4px"}),
+            html.Div(
+                value,
+                style={"fontSize": "1.4em", "fontWeight": "bold", "color": "#333"},
+            ),
+            html.Div(unit, style={"color": "#aaa", "fontSize": "0.7em"}),
+        ],
+    )
+
+
+# ── EIS Callback ─────────────────────────────────────────────────────────────
+
+@app.callback(
+    [
+        Output("eis-status-bar", "children"),
+        Output("eis-nyquist", "figure"),
+        Output("eis-bode-mag", "figure"),
+        Output("eis-bode-phase", "figure"),
+        Output("eis-params", "children"),
+        Output("eis-timeseries", "figure"),
+    ],
+    Input("eis-tick", "n_intervals"),
+)
+def update_eis(n):  # noqa: ANN001
+    snap = eis_buffer.get_snapshot()
+    status = snap["status"]
+    ts = snap["sweep_timestamp"]
+    count = snap["sweep_count"]
+    err = snap["error_msg"]
+
+    # ── Derive effective status (STALE if last sweep was too long ago) ──────
+    effective_status = status
+    age_s: float | None = None
+    if status == "LIVE" and ts is not None:
+        age_s = (datetime.now(timezone.utc) - ts).total_seconds()
+        if age_s > STALE_THRESHOLD_S:
+            effective_status = "STALE"
+
+    # ── Status bar ──────────────────────────────────────────────────────────
+    STATUS_COLORS = {
+        "LIVE": "#4CAF50", "STALE": "#FF9800", "NO_DATA": "#9E9E9E", "ERROR": "#F44336",
+    }
+    status_color = STATUS_COLORS.get(effective_status, "#9E9E9E")
+    age_str = f"  Last: {int(age_s)}s ago" if age_s is not None else ""
+    err_str = f"  {err}" if err and effective_status == "ERROR" else ""
+
+    latest = snap["latest"]
+    fit_badge = html.Span("")
+    if latest and latest.get("fit", {}).get("fit_ok"):
+        fit_badge = _residual_badge(latest["fit"]["residual"])
+
+    status_bar = html.Div(
+        style={"display": "flex", "alignItems": "center", "gap": "8px", "flexWrap": "wrap", "marginBottom": "4px"},
+        children=[
+            html.Span(
+                effective_status,
+                style={
+                    "background": status_color, "color": "white",
+                    "padding": "3px 12px", "borderRadius": "5px",
+                    "fontWeight": "bold", "fontSize": "0.9em",
+                },
+            ),
+            html.Span(
+                f"Port: {EIS_PORT} | {EIS_BAUD} baud | Sweeps: {count}{age_str}{err_str}",
+                style={"color": "#666", "fontSize": "0.85em"},
+            ),
+            fit_badge,
+        ],
+    )
+
+    # ── Blank figures when no data ────────────────────────────────────────
+    if latest is None:
+        blank = _blank_fig(height=250, annotation="No hardware data")
+        blank_ts = _blank_fig(height=200, annotation="No sweep history")
+        no_cards = html.Div(
+            "No EIS data — connect STM32 hardware",
+            style={"color": "#aaa", "fontStyle": "italic", "padding": "8px"},
+        )
+        return status_bar, blank, blank, blank, no_cards, blank_ts
+
+    freq = latest["freq"]
+    Z_re = latest["Z_re"]
+    Z_im = latest["Z_im"]
+    an = latest.get("analytical") or {}
+    ft = latest.get("fit") or {}
+
+    # ── Nyquist plot ─────────────────────────────────────────────────────
+    nyq_fig = go.Figure()
+
+    # Previous sweep (ghost trace)
+    prev = snap["previous"]
+    if prev:
+        nyq_fig.add_trace(go.Scatter(
+            x=prev["Z_re"], y=[-v for v in prev["Z_im"]],
+            mode="markers+lines",
+            marker=dict(size=5, color="#BDBDBD"),
+            line=dict(color="#BDBDBD", width=1, dash="dot"),
+            name="Previous", showlegend=True,
+        ))
+
+    # Current sweep (solid)
+    nyq_fig.add_trace(go.Scatter(
+        x=Z_re, y=[-v for v in Z_im],
+        mode="markers+lines",
+        marker=dict(size=6, color="#42A5F5"),
+        line=dict(color="#42A5F5", width=2),
+        name="Current", showlegend=True,
+    ))
+
+    # Randles fit overlay (dashed orange) — T5
+    if ft.get("fit_ok") and ft.get("Rs_fit") is not None:
+        omega_dense = np.logspace(
+            np.log10(2 * np.pi * min(freq)),
+            np.log10(2 * np.pi * max(freq)),
+            50,
+        )
+        Cdl_F = (ft["Cdl_uF"] or 0) / 1e6
+        Z_fit_dense = randles_impedance(
+            omega_dense,
+            ft["Rs_fit"],
+            ft["Rct"],
+            Cdl_F,
+            ft["sigma"],
+        )
+        nyq_fig.add_trace(go.Scatter(
+            x=Z_fit_dense.real, y=-Z_fit_dense.imag,
+            mode="lines",
+            line=dict(color="#FF9800", width=2, dash="dash"),
+            name="Randles fit", showlegend=True,
+        ))
+
+    nyq_fig.update_layout(
+        xaxis_title="Re(Z) / Ω", yaxis_title="−Im(Z) / Ω",
+        height=260,
+        margin=dict(t=20, b=40, l=50, r=20),
+        legend=dict(orientation="h", y=1.08, x=0),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    # ── Bode magnitude ───────────────────────────────────────────────────
+    Z_abs = [np.hypot(r, i) for r, i in zip(Z_re, Z_im)]
+    bode_mag = go.Figure()
+    bode_mag.add_trace(go.Scatter(
+        x=freq, y=Z_abs, mode="markers+lines",
+        marker=dict(size=5, color="#66BB6A"), showlegend=False,
+    ))
+    bode_mag.update_layout(
+        xaxis_title="Frequency (Hz)", yaxis_title="|Z| (Ω)",
+        xaxis_type="log", yaxis_type="log",
+        height=260,
+        margin=dict(t=20, b=40, l=50, r=20),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    # ── Bode phase ───────────────────────────────────────────────────────
+    phases = [np.degrees(np.arctan2(i, r)) for r, i in zip(Z_re, Z_im)]
+    bode_phase = go.Figure()
+    bode_phase.add_trace(go.Scatter(
+        x=freq, y=phases, mode="markers+lines",
+        marker=dict(size=5, color="#AB47BC"), showlegend=False,
+    ))
+    bode_phase.update_layout(
+        xaxis_title="Frequency (Hz)", yaxis_title="Phase (°)",
+        xaxis_type="log",
+        height=260,
+        margin=dict(t=20, b=40, l=50, r=20),
+        paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    # ── Parameter cards ──────────────────────────────────────────────────
+    CARD_STYLE = {"display": "flex", "gap": "10px", "flexWrap": "wrap", "marginBottom": "12px"}
+    analytical_cards = html.Div(style=CARD_STYLE, children=[
+        _param_card("Rs", _fmt(an.get("Rs")), "Ω"),
+        _param_card("|Z| @ 1 Hz", _fmt(an.get("Z_abs_1Hz")), "Ω"),
+        _param_card("Phase @ 100 Hz", _fmt(an.get("phase_100Hz"), ".1f"), "°"),
+        _param_card("f_peak", _fmt(an.get("f_peak"), ".1f"), "Hz"),
+        _param_card("τ", _fmt(an.get("tau_ms"), ".1f"), "ms"),
+    ])
+    fitted_cards = html.Div(style=CARD_STYLE, children=[
+        _param_card("Rct", _fmt(ft.get("Rct")), "Ω"),
+        _param_card("Cdl", _fmt(ft.get("Cdl_uF"), ".2f"), "µF"),
+        _param_card("Warburg σ", _fmt(ft.get("sigma"), ".2f"), "Ω·s⁻⁰·⁵"),
+        _param_card("i₀ proxy", _fmt(ft.get("i0_proxy_mA_cm2"), ".3f"), "mA/cm²"),
+    ])
+    param_section = html.Div([
+        html.Div([
+            html.Span("Analytical", style={"fontWeight": "600", "fontSize": "0.82em", "color": "#555", "textTransform": "uppercase", "letterSpacing": "0.05em"}),
+        ], style={"marginBottom": "6px"}),
+        analytical_cards,
+        html.Div([
+            html.Span("Randles fit", style={"fontWeight": "600", "fontSize": "0.82em", "color": "#555", "textTransform": "uppercase", "letterSpacing": "0.05em"}),
+            html.Span(
+                " fit failed" if not ft.get("fit_ok") else "",
+                style={"background": "#EF5350", "color": "white", "padding": "1px 8px", "borderRadius": "4px", "fontSize": "0.75em", "marginLeft": "8px"},
+            ) if not ft.get("fit_ok") else "",
+        ], style={"marginBottom": "6px"}),
+        fitted_cards,
+    ])
+
+    # ── Time series ──────────────────────────────────────────────────────
+    history = snap["history"]
+    if len(history) > 1:
+        xs = list(range(len(history)))
+        rs_vals = [h.get("analytical", {}).get("Rs") for h in history]
+        rct_vals = [h.get("fit", {}).get("Rct") for h in history]
+        cdl_vals = [h.get("fit", {}).get("Cdl_uF") for h in history]
+        ph_vals  = [h.get("analytical", {}).get("phase_100Hz") for h in history]
+
+        ts_fig = make_subplots(
+            rows=2, cols=2,
+            subplot_titles=("Rs (Ω)", "Rct (Ω)", "Cdl (µF)", "Phase @ 100 Hz (°)"),
+            vertical_spacing=0.18,
+        )
+        ts_fig.add_trace(go.Scatter(x=xs, y=rs_vals, line=dict(color="#42A5F5"), showlegend=False), row=1, col=1)
+        ts_fig.add_trace(go.Scatter(x=xs, y=rct_vals, line=dict(color="#66BB6A"), showlegend=False), row=1, col=2)
+        ts_fig.add_trace(go.Scatter(x=xs, y=cdl_vals, line=dict(color="#FFA726"), showlegend=False), row=2, col=1)
+        ts_fig.add_trace(go.Scatter(x=xs, y=ph_vals, line=dict(color="#AB47BC"), showlegend=False), row=2, col=2)
+        ts_fig.update_layout(
+            height=280, showlegend=False,
+            margin=dict(t=40, b=20, l=40, r=20),
+            paper_bgcolor="rgba(0,0,0,0)", plot_bgcolor="rgba(0,0,0,0)",
+        )
+    else:
+        ts_fig = _blank_fig(height=280, annotation="Waiting for sweep history…")
+
+    return status_bar, nyq_fig, bode_mag, bode_phase, param_section, ts_fig
 
 
 # ── Entry point ──────────────────────────────────────────────────────────────

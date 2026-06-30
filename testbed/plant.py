@@ -90,9 +90,14 @@ class PlantSimulator:
             I_sp = float(np.clip(setpoints.get("I_cell_setpoint", s.I_cell), 10, 200))
 
             # During fault the current controller fights the fault injector
-            if s.fault_active == "anode_effect":
-                # Recovery ramp: drive current toward zero quickly
+            fault = s.fault_active
+            i_mult = self._FAULT_I_MULT.get(fault, 1.0) if fault else 1.0
+            if fault in ("anode_burnout", "anode_effect", "power_loss"):
+                # Unrecoverable / power-off: ramp current to minimum quickly
                 s.I_cell = max(10.0, s.I_cell - 20.0 * dt)
+            elif i_mult != 1.0:
+                # Named faults with an I multiplier (e.g. cathode_flooding)
+                s.I_cell = float(np.clip(s.I_cell * i_mult, 10, 200))
             else:
                 # Slew-rate-limited current tracking (20 A/s)
                 delta = float(np.clip(I_sp - s.I_cell, -20 * dt, 20 * dt))
@@ -115,10 +120,12 @@ class PlantSimulator:
 
             # Terminal voltage: V = I * R + noise
             V_nominal = s.I_cell * R_cell + rng.normal(0, 0.05)
-            if s.fault_active == "anode_effect":
-                # Voltage spike during anode effect
-                multiplier = getattr(self, "_fault_multiplier", 3.5)
-                s.V_cell = float(V_nominal * multiplier + rng.normal(0, 0.3))
+            if s.fault_active and s.fault_active != "sensor_dropout":
+                v_mult = getattr(self, "_fault_multiplier", 1.0)
+                if v_mult == 0.0:
+                    s.V_cell = 0.0
+                else:
+                    s.V_cell = float(np.clip(V_nominal * v_mult + rng.normal(0, 0.3), 0.0, 25.0))
             else:
                 s.V_cell = float(np.clip(V_nominal, 0.5, 20.0))
 
@@ -175,11 +182,37 @@ class PlantSimulator:
         with self._lock:
             return copy.deepcopy(self._state)
 
+    # Per-fault V_cell multipliers applied in step().
+    # Values are demo-level physics: visible effect, not accurate simulation.
+    _FAULT_V_MULT: dict[str, float] = {
+        "anode_burnout":    4.0,   # electrode gone → very high V
+        "anode_effect":     3.5,   # legacy alias
+        "power_loss":       0.0,   # power off → V collapses
+        "melt_freeze":      1.5,   # partial freeze → elevated V
+        "electrode_short":  0.3,   # short → V drops
+        "bath_depletion":   1.2,   # depleted → slightly elevated V
+        "sensor_dropout":   1.0,   # sensor fault only, plant unchanged
+        "cathode_flooding": 0.8,   # flooding → lower V, higher I
+        "offgas_blockage":  1.4,   # backpressure → elevated V
+        # legacy detector name
+        "electrode_degradation": 1.0,
+    }
+
+    # Per-fault I_cell multipliers (multiplicative on the slew-limited target)
+    _FAULT_I_MULT: dict[str, float] = {
+        "power_loss":       0.0,
+        "cathode_flooding": 1.3,
+    }
+
     def apply_fault(self, fault_name: str, multiplier: float = 3.5) -> None:
-        """Externally apply a fault (called by FaultInjector)."""
+        """Externally apply a fault (called by FaultInjector).
+
+        ``multiplier`` is kept for backwards-compatible callers but is
+        overridden by ``_FAULT_V_MULT`` when a named entry exists.
+        """
         with self._lock:
             self._state.fault_active = fault_name
-            self._fault_multiplier = multiplier
+            self._fault_multiplier = self._FAULT_V_MULT.get(fault_name, multiplier)
 
     def clear_fault(self) -> None:
         with self._lock:
