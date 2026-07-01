@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from collections import Counter
+
 import pytest
 
-from testbed.faults import AnodeEffectDetector
+from testbed.faults import AnodeEffectDetector, FaultClassifier
 from testbed.plant import PlantSimulator, PlantState
 
 
@@ -104,3 +106,70 @@ class TestFaultSignatures:
         v1, _ = _run_fault("electrode_short")
         v2, _ = _run_fault("electrode_short")
         assert v1 == pytest.approx(v2, rel=1e-4)
+
+
+_CLASSIFIER_SETPOINTS = {"heater_power": 5000.0, "I_cell_setpoint": 100.0}
+_DETECTABLE_FAULTS = [
+    "power_loss",
+    "electrode_short",
+    "bath_depletion",
+    "offgas_blockage",
+    "melt_freeze",
+    "cathode_flooding",
+    "anode_burnout",
+]
+
+
+class TestFaultClassifier:
+
+    @pytest.mark.parametrize("fault_name", _DETECTABLE_FAULTS)
+    def test_per_fault_accuracy_90_percent(self, fault_name: str) -> None:
+        correct = 0
+        for _ in range(50):
+            clf = FaultClassifier()
+            plant = PlantSimulator()
+            for _ in range(5):
+                state = plant.step(dt=1.0, setpoints=_CLASSIFIER_SETPOINTS)
+            plant.apply_fault(fault_name)
+            preds = []
+            for _ in range(15):
+                state = plant.step(dt=1.0, setpoints=_CLASSIFIER_SETPOINTS)
+                preds.append(clf.update(state))
+            last5 = preds[10:]
+            counted = Counter(p for p in last5 if p is not None)
+            majority = counted.most_common(1)[0][0] if counted else None
+            if majority == fault_name:
+                correct += 1
+        assert correct >= 45, f"{fault_name}: {correct}/50 correct (need ≥45)"
+
+    def test_nominal_false_alarm_rate_below_5_percent(self) -> None:
+        clf = FaultClassifier()
+        plant = PlantSimulator()
+        false_alarms = 0
+        for _ in range(200):
+            state = plant.step(dt=1.0, setpoints=_CLASSIFIER_SETPOINTS)
+            pred = clf.update(state)
+            if pred is not None:
+                false_alarms += 1
+        assert false_alarms < 10, f"False alarms: {false_alarms}/200 (need <10)"
+
+    def test_sensor_dropout_returns_none(self) -> None:
+        clf = FaultClassifier()
+        plant = PlantSimulator()
+        for _ in range(5):
+            plant.step(dt=1.0, setpoints=_CLASSIFIER_SETPOINTS)
+        plant.apply_fault("sensor_dropout")
+        for _ in range(15):
+            state = plant.step(dt=1.0, setpoints=_CLASSIFIER_SETPOINTS)
+            assert clf.update(state) is None
+
+    def test_reset_clears_warmup_state(self) -> None:
+        clf = FaultClassifier()
+        plant = PlantSimulator()
+        for _ in range(5):
+            state = plant.step(dt=1.0, setpoints=_CLASSIFIER_SETPOINTS)
+            clf.update(state)
+        clf.reset()
+        for _ in range(3):
+            state = plant.step(dt=1.0, setpoints=_CLASSIFIER_SETPOINTS)
+            assert clf.update(state) is None

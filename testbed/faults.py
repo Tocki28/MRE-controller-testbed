@@ -3,12 +3,15 @@
 FaultInjector: exposes inject()/clear() to the Streamlit UI.
 AnodeEffectDetector: stateless detection on V_cell history.
 ElectrodeDegradationDetector: EIS-inferred health-based detection.
+FaultClassifier: rule-based classifier using rolling V_cell / I_cell averages.
 """
 
 from __future__ import annotations
 
 import threading
+from collections import deque
 
+import numpy as np
 import structlog
 
 from testbed.interfaces import FaultDetector
@@ -106,3 +109,46 @@ class FaultInjector:
     def active_fault(self) -> str | None:
         with self._lock:
             return self._active
+
+
+class FaultClassifier:
+    """Rule-based fault classifier using a rolling window of V_cell and I_cell."""
+
+    WINDOW = 10  # steps — averaging over 10 reduces σ to ~0.095 V
+
+    def __init__(self) -> None:
+        self._v_buf: deque[float] = deque(maxlen=self.WINDOW)
+        self._i_buf: deque[float] = deque(maxlen=self.WINDOW)
+
+    def update(self, state: PlantState) -> str | None:
+        """Feed one state; return predicted fault name or None for nominal/sensor_dropout."""
+        self._v_buf.append(state.V_cell)
+        self._i_buf.append(state.I_cell)
+        if len(self._v_buf) < self.WINDOW:
+            return None  # warm-up
+
+        V = float(np.mean(self._v_buf))
+        I = float(np.mean(self._i_buf))
+
+        if V < 0.5:
+            return "power_loss"
+        if V < 2.0:
+            if I < 70:
+                return "anode_burnout"
+            return "electrode_short"
+        if V < 3.5:
+            return None  # nominal or sensor_dropout (indistinguishable)
+        if V < 4.1:
+            return "bath_depletion"
+        if V < 4.4:
+            return "offgas_blockage"
+        # V >= 4.4
+        if I > 150:
+            return "cathode_flooding"
+        if I < 70:
+            return "anode_burnout"
+        return "melt_freeze"
+
+    def reset(self) -> None:
+        self._v_buf.clear()
+        self._i_buf.clear()
